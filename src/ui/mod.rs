@@ -1,0 +1,208 @@
+pub mod artwork;
+pub mod components;
+pub mod mouse;
+pub mod spectrum;
+pub mod theme;
+pub mod views;
+pub mod waveform_widget;
+
+use crate::app::{App, FileBrowserItemTarget, FocusArea};
+use crate::ui::components::header::HeaderComponent;
+use crate::ui::components::help_modal::HelpModal;
+use crate::ui::components::player_bar::PlayerBar;
+use crate::ui::components::playlist_dialog::PlaylistDialog;
+use crate::ui::components::sidebar::{SidebarComponent, ViewMode};
+use crate::ui::views::albums_view::AlbumsView;
+use crate::ui::views::artists_view::ArtistsView;
+use crate::ui::views::file_browser::FileBrowserView;
+use crate::ui::views::now_playing::NowPlayingView;
+use crate::ui::views::playlists_view::PlaylistsView;
+use crate::ui::views::settings_view::SettingsView;
+use crate::ui::views::songs_view::SongsView;
+use ratatui::layout::Rect;
+use ratatui::Frame;
+
+pub fn render_app(frame: &mut Frame, app: &mut App) {
+    let area = frame.area();
+    if area.width < 30 || area.height < 10 {
+        return;
+    }
+
+    let header_height = 2u16;
+    let player_height = 3u16;
+    let center_height = area.height.saturating_sub(header_height + player_height);
+
+    let header_area = Rect::new(area.left(), area.top(), area.width, header_height);
+    let center_area = Rect::new(area.left(), area.top() + header_height, area.width, center_height);
+    let player_area = Rect::new(area.left(), area.bottom().saturating_sub(player_height), area.width, player_height);
+
+    // 1. Render Header
+    let view_title = match app.view_mode {
+        ViewMode::Songs => "Library > Songs",
+        ViewMode::Artists => "Library > Artists",
+        ViewMode::Albums => "Library > Albums",
+        ViewMode::NowPlaying => "Now Playing & Visualizer",
+        ViewMode::Playlists => "Playlists",
+        ViewMode::FileBrowser => "File Browser",
+        ViewMode::Settings => "Settings",
+    };
+
+    let header_comp = HeaderComponent {
+        view_title,
+        total_tracks: app.library.tracks.len(),
+        search_query: &app.search_query,
+        is_searching: app.is_searching,
+    };
+    app.last_header_targets = Some(header_comp.render_with_targets(header_area, frame.buffer_mut()));
+
+    // 2. Render Center Area: Sidebar (left) + Main View (right)
+    let sidebar_width = 24u16.min(center_area.width / 3).max(18);
+    let main_width = center_area.width.saturating_sub(sidebar_width);
+
+    let sidebar_area = Rect::new(center_area.left(), center_area.top(), sidebar_width, center_area.height);
+    let main_area = Rect::new(center_area.left() + sidebar_width, center_area.top(), main_width, center_area.height);
+
+    // Sidebar
+    let sidebar_comp = SidebarComponent {
+        current_view: app.view_mode,
+        current_playlist_id: Some(&app.active_playlist_id),
+        playlists_manager: &app.playlists_manager,
+        is_focused: app.focus == FocusArea::Sidebar,
+        selected_index: app.sidebar_index,
+    };
+    app.last_sidebar_targets = sidebar_comp.render_with_targets(sidebar_area, frame.buffer_mut());
+
+    // Main View
+    let is_main_focused = app.focus == FocusArea::MainView;
+    let playing_track = app.audio.current_track();
+    let playing_id = playing_track.as_ref().map(|t| t.id.as_str());
+
+    // Clear previous targets for current view
+    app.last_songs_targets.clear();
+    app.last_artists_targets.clear();
+    app.last_albums_targets.clear();
+    app.last_now_playing_target = None;
+    app.last_playlists_targets.clear();
+    app.last_browser_targets.clear();
+    app.last_settings_targets.clear();
+
+    match app.view_mode {
+        ViewMode::Songs => {
+            let searched_tracks = app.library.search(&app.search_query);
+            let songs_view = SongsView {
+                tracks: &searched_tracks,
+                selected_index: app.songs_selected_idx,
+                scroll_offset: app.songs_scroll_offset,
+                playing_track_id: playing_id,
+                playlists_manager: &app.playlists_manager,
+                is_focused: is_main_focused,
+            };
+            app.last_songs_targets = songs_view.render_with_targets(main_area, frame.buffer_mut());
+        }
+        ViewMode::Artists => {
+            let artists_view = ArtistsView {
+                library: &app.library,
+                active_column: app.artists_col,
+                selected_artist_idx: app.artists_selected_idx,
+                selected_album_idx: app.artists_album_idx,
+                selected_song_idx: app.artists_song_idx,
+                playing_track_id: playing_id,
+                is_focused: is_main_focused,
+            };
+            app.last_artists_targets = artists_view.render_with_targets(main_area, frame.buffer_mut());
+        }
+        ViewMode::Albums => {
+            let albums = app.library.all_albums();
+            let albums_view = AlbumsView {
+                albums: &albums,
+                selected_index: app.albums_selected_idx,
+                scroll_offset: app.albums_scroll_offset,
+                is_focused: is_main_focused,
+            };
+            app.last_albums_targets = albums_view.render_with_targets(main_area, frame.buffer_mut());
+        }
+        ViewMode::NowPlaying => {
+            let waveform = app.audio.current_waveform();
+            let np_view = NowPlayingView {
+                current_track: playing_track.as_ref(),
+                elapsed: app.audio.elapsed(),
+                total_duration: app.audio.total_duration(),
+                artwork_cache: &app.artwork_cache,
+                visualizer: app.audio.visualizer(),
+                waveform: waveform.as_ref(),
+                is_focused: is_main_focused,
+            };
+            app.last_now_playing_target = np_view.render_with_targets(main_area, frame.buffer_mut());
+        }
+        ViewMode::Playlists => {
+            let playlists_view = PlaylistsView {
+                library: &app.library,
+                playlists_manager: &app.playlists_manager,
+                selected_playlist_id: &app.active_playlist_id,
+                selected_track_idx: app.playlists_track_idx,
+                playing_track_id: playing_id,
+                is_focused: is_main_focused,
+            };
+            app.last_playlists_targets = playlists_view.render_with_targets(main_area, frame.buffer_mut());
+        }
+        ViewMode::FileBrowser => {
+            let browser_view = FileBrowserView {
+                current_dir: &app.browser_current_dir,
+                items: &app.browser_items,
+                selected_index: app.browser_selected_idx,
+                scroll_offset: app.browser_scroll_offset,
+                is_focused: is_main_focused,
+            };
+            let raw_targets = browser_view.render_with_targets(main_area, frame.buffer_mut());
+            app.last_browser_targets = raw_targets
+                .into_iter()
+                .map(|t| FileBrowserItemTarget {
+                    rect: t.rect,
+                    item_index: t.item_index,
+                })
+                .collect();
+        }
+        ViewMode::Settings => {
+            let settings_view = SettingsView {
+                config: &app.config,
+                selected_folder_idx: app.settings_selected_folder,
+                new_folder_input: &app.new_folder_input,
+                is_entering_folder: app.is_entering_folder,
+                is_scanning: app.is_scanning,
+                scan_status: &app.scan_status,
+                is_focused: is_main_focused,
+            };
+            app.last_settings_targets = settings_view.render_with_targets(main_area, frame.buffer_mut());
+        }
+    }
+
+    // 3. Render Bottom Player Bar
+    let current_waveform = app.audio.current_waveform();
+    let player_bar = PlayerBar {
+        current_track: playing_track.as_ref(),
+        playback_state: app.audio.state(),
+        elapsed: app.audio.elapsed(),
+        total_duration: app.audio.total_duration(),
+        volume: app.audio.volume(),
+        is_muted: app.is_muted,
+        repeat_mode: app.config.repeat_mode,
+        shuffle: app.config.shuffle,
+        waveform: current_waveform.as_ref(),
+    };
+    app.last_player_targets = player_bar.render_with_targets(player_area, frame.buffer_mut());
+
+    // 4. Overlays & Modals
+    app.last_dialog_targets.clear();
+    if let Some((mode, track)) = &app.playlist_dialog {
+        let dialog = PlaylistDialog {
+            mode,
+            track,
+            playlists_manager: &app.playlists_manager,
+        };
+        app.last_dialog_targets = dialog.render_with_targets(area, frame.buffer_mut());
+    }
+
+    if app.show_help {
+        HelpModal::render(area, frame.buffer_mut());
+    }
+}
