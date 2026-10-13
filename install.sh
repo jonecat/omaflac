@@ -212,7 +212,7 @@ else
     TMP_DIR="$(mktemp -d 2>/dev/null || mktemp -d -t 'omaflac-build')"
     SRC_DIR="$TMP_DIR/omaflac"
     info "Cloning OmaFLAC from ${BOLD}${REPO_URL}${RESET}..."
-    git clone --depth 1 "$REPO_URL" "$SRC_DIR"
+    git clone "$REPO_URL" "$SRC_DIR"
 fi
 
 info "Compiling OmaFLAC in release mode (this may take a minute)..."

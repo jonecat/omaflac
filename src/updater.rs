@@ -6,6 +6,8 @@ pub const RAW_CARGO_TOML_URL: &str =
     "https://raw.githubusercontent.com/jonecat/omaflac/main/Cargo.toml";
 pub const GITHUB_COMMITS_API_URL: &str =
     "https://api.github.com/repos/jonecat/omaflac/commits/main";
+pub const GITHUB_COMMITS_LIST_URL: &str =
+    "https://api.github.com/repos/jonecat/omaflac/commits?sha=main&per_page=1";
 pub const INSTALL_SCRIPT_URL: &str =
     "https://raw.githubusercontent.com/jonecat/omaflac/main/install.sh";
 
@@ -34,7 +36,11 @@ pub struct Updater;
 
 impl Updater {
     pub fn current_version() -> &'static str {
-        env!("CARGO_PKG_VERSION")
+        option_env!("OMAFLAC_DYNAMIC_VERSION").unwrap_or(env!("CARGO_PKG_VERSION"))
+    }
+
+    pub fn current_commit_count() -> Option<usize> {
+        option_env!("OMAFLAC_COMMIT_COUNT").and_then(|s| s.parse::<usize>().ok())
     }
 
     pub fn current_commit() -> &'static str {
@@ -81,7 +87,92 @@ impl Updater {
         None
     }
 
-    fn fetch_remote_version_and_commit() -> Result<(String, Option<String>), String> {
+    fn parse_last_page_from_link_header(header: &str) -> Option<usize> {
+        for part in header.split(',') {
+            if part.contains("rel=\"last\"") {
+                if let Some(start) = part.find("&page=") {
+                    let slice = &part[start + 6..];
+                    let num_str: String = slice.chars().take_while(|c| c.is_ascii_digit()).collect();
+                    if let Ok(n) = num_str.parse::<usize>() {
+                        return Some(n);
+                    }
+                }
+            }
+        }
+        None
+    }
+
+    fn fetch_remote_commit_count_and_sha() -> (Option<usize>, Option<String>) {
+        let out = Command::new("curl")
+            .args([
+                "-fsSI",
+                "--max-time",
+                "4",
+                "-H",
+                "Accept: application/vnd.github.v3+json",
+                "-A",
+                "OmaFLAC-Updater",
+                GITHUB_COMMITS_LIST_URL,
+            ])
+            .stdin(Stdio::null())
+            .stderr(Stdio::null())
+            .output();
+
+        let mut remote_count = None;
+        if let Ok(resp) = out {
+            if resp.status.success() {
+                let headers = String::from_utf8_lossy(&resp.stdout);
+                for line in headers.lines() {
+                    if line.to_ascii_lowercase().starts_with("link:") {
+                        remote_count = Self::parse_last_page_from_link_header(line);
+                        break;
+                    }
+                }
+            }
+        }
+
+        let sha_out = Command::new("curl")
+            .args([
+                "-fsSL",
+                "--max-time",
+                "4",
+                "-H",
+                "Accept: application/vnd.github.v3+json",
+                "-A",
+                "OmaFLAC-Updater",
+                GITHUB_COMMITS_API_URL,
+            ])
+            .stdin(Stdio::null())
+            .stderr(Stdio::null())
+            .output();
+
+        let remote_sha = sha_out
+            .ok()
+            .and_then(|out| {
+                if out.status.success() {
+                    serde_json::from_slice::<serde_json::Value>(&out.stdout).ok()
+                } else {
+                    None
+                }
+            })
+            .and_then(|json| {
+                json.get("sha")
+                    .and_then(|v| v.as_str())
+                    .map(|sha| sha.chars().take(7).collect::<String>())
+            });
+
+        (remote_count, remote_sha)
+    }
+
+    fn fetch_remote_version_and_commit() -> Result<(String, Option<String>, Option<usize>), String> {
+        let (remote_commits, remote_sha) = Self::fetch_remote_commit_count_and_sha();
+
+        if let Some(commits) = remote_commits {
+            let ver = format!("0.1.{}", commits);
+            return Ok((ver, remote_sha, Some(commits)));
+        }
+
+        // Fallback to checking Cargo.toml if GitHub commits list API is unavailable
         let cargo_out = Command::new("curl")
             .args(["-fsSL", "--max-time", "4", RAW_CARGO_TOML_URL])
             .stdin(Stdio::null())
@@ -97,35 +188,7 @@ impl Updater {
         let remote_version = Self::parse_version_from_cargo_toml(&cargo_str)
             .ok_or_else(|| "Could not parse remote Cargo.toml version".to_string())?;
 
-        let remote_commit = Command::new("curl")
-            .args([
-                "-fsSL",
-                "--max-time",
-                "4",
-                "-H",
-                "Accept: application/vnd.github.v3+json",
-                "-A",
-                "OmaFLAC-Updater",
-                GITHUB_COMMITS_API_URL,
-            ])
-            .stdin(Stdio::null())
-            .stderr(Stdio::null())
-            .output()
-            .ok()
-            .and_then(|out| {
-                if out.status.success() {
-                    serde_json::from_slice::<serde_json::Value>(&out.stdout).ok()
-                } else {
-                    None
-                }
-            })
-            .and_then(|json| {
-                json.get("sha")
-                    .and_then(|v| v.as_str())
-                    .map(|sha| sha.chars().take(7).collect::<String>())
-            });
-
-        Ok((remote_version, remote_commit))
+        Ok((remote_version, remote_sha, None))
     }
 
     /// Checks if `remote_commit` is already an ancestor of a local git checkout's HEAD
@@ -143,9 +206,29 @@ impl Updater {
 
     pub fn check_remote() -> UpdateStatus {
         match Self::fetch_remote_version_and_commit() {
-            Ok((remote_ver, remote_commit)) => {
+            Ok((remote_ver, remote_commit, remote_commits_opt)) => {
                 let local_ver = Self::current_version();
                 let local_commit = Self::current_commit();
+                let local_commits_opt = Self::current_commit_count();
+
+                // If both remote and local have commit counts on 0.1.x, compare commit counts directly
+                if let (Some(r_count), Some(l_count)) = (remote_commits_opt, local_commits_opt) {
+                    if r_count > l_count {
+                        return UpdateStatus::UpdateAvailable {
+                            latest_version: remote_ver,
+                            latest_commit: remote_commit,
+                        };
+                    } else {
+                        return UpdateStatus::UpToDate {
+                            version: local_ver.to_string(),
+                            commit: if local_commit != "unknown" {
+                                Some(local_commit.to_string())
+                            } else {
+                                remote_commit
+                            },
+                        };
+                    }
+                }
 
                 let remote_tuple = Self::parse_semver(&remote_ver);
                 let local_tuple = Self::parse_semver(local_ver);
@@ -218,8 +301,6 @@ impl Updater {
             let clone_status = Command::new("git")
                 .args([
                     "clone",
-                    "--depth",
-                    "1",
                     REPO_GIT_URL,
                     &tmp_dir.to_string_lossy(),
                 ])
@@ -236,10 +317,24 @@ impl Updater {
                 return;
             }
 
-            let new_ver = std::fs::read_to_string(tmp_dir.join("Cargo.toml"))
+            let new_count = Command::new("git")
+                .args(["rev-list", "--count", "HEAD"])
+                .current_dir(&tmp_dir)
+                .stdin(Stdio::null())
+                .stderr(Stdio::null())
+                .output()
                 .ok()
-                .and_then(|c| Self::parse_version_from_cargo_toml(&c))
-                .unwrap_or_else(|| Self::current_version().to_string());
+                .and_then(|o| String::from_utf8(o.stdout).ok())
+                .and_then(|s| s.trim().parse::<usize>().ok());
+
+            let new_ver = if let Some(count) = new_count {
+                format!("0.1.{}", count)
+            } else {
+                std::fs::read_to_string(tmp_dir.join("Cargo.toml"))
+                    .ok()
+                    .and_then(|c| Self::parse_version_from_cargo_toml(&c))
+                    .unwrap_or_else(|| Self::current_version().to_string())
+            };
 
             let new_sha = Command::new("git")
                 .args(["rev-parse", "--short", "HEAD"])
