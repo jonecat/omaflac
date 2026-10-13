@@ -1,10 +1,5 @@
-mod app;
-mod audio;
-mod config;
-mod library;
-mod ui;
-
-use app::App;
+use omaflac::app::App;
+use omaflac::ui;
 use crossterm::cursor::{Hide, Show};
 use crossterm::event::{self, DisableMouseCapture, EnableMouseCapture, Event};
 use crossterm::execute;
