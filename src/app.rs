@@ -57,6 +57,7 @@ pub struct App {
     pub queue_index: usize,
     pub is_muted: bool,
     pub pre_mute_volume: f32,
+    pub lyrics_manager: crate::lyrics::LyricsManager,
 
     // Global Search
     pub search_query: String,
@@ -183,6 +184,7 @@ impl App {
             queue_index: 0,
             is_muted: false,
             pre_mute_volume: 0.8,
+            lyrics_manager: crate::lyrics::LyricsManager::new(),
             search_query: String::new(),
             is_searching: false,
             previous_view_mode: ViewMode::Artists,
@@ -261,6 +263,14 @@ impl App {
     pub fn on_tick(&mut self) {
         // Hot-reload theme if Omarchy desktop colors changed
         self.theme.refresh_if_changed();
+
+        // Check for synchronized lyrics events
+        self.lyrics_manager.poll();
+        if let Some(track) = self.audio.current_track() {
+            if self.lyrics_manager.current_track_id() != Some(&track.id) {
+                self.lyrics_manager.request_lyrics(&track);
+            }
+        }
 
         // Check for updater events
         if let Some(rx) = &self.update_receiver {
@@ -424,11 +434,15 @@ impl App {
 
     pub fn update_next_track(&mut self) {
         let next = self.peek_next_track();
+        if let Some(track) = &next {
+            self.lyrics_manager.prefetch_lyrics(track);
+        }
         self.audio.set_next_track(next);
     }
 
     pub fn handle_track_transitioned(&mut self, track: Track) {
         self.playlists_manager.add_recently_played(&track.id);
+        self.lyrics_manager.request_lyrics(&track);
         self.audio.on_track_transitioned(&track);
 
         // Find position of transitioned track in playback queue
@@ -447,6 +461,7 @@ impl App {
 
     pub fn play_track_now(&mut self, track: Track) {
         self.playlists_manager.add_recently_played(&track.id);
+        self.lyrics_manager.request_lyrics(&track);
         self.audio.play_track(track);
         self.update_next_track();
     }
@@ -1019,7 +1034,7 @@ impl App {
                 return;
             }
             KeyCode::Left if key.modifiers.contains(KeyModifiers::SHIFT) => {
-                if self.focus == FocusArea::PlayerBar {
+                if self.focus == FocusArea::PlayerBar || self.view_mode == ViewMode::NowPlaying {
                     self.prev_track();
                 } else {
                     self.audio.seek_relative(-30);
@@ -1027,7 +1042,7 @@ impl App {
                 return;
             }
             KeyCode::Right if key.modifiers.contains(KeyModifiers::SHIFT) => {
-                if self.focus == FocusArea::PlayerBar {
+                if self.focus == FocusArea::PlayerBar || self.view_mode == ViewMode::NowPlaying {
                     self.next_track();
                 } else {
                     self.audio.seek_relative(30);
@@ -1092,6 +1107,11 @@ impl App {
                 self.config.shuffle = !self.config.shuffle;
                 self.config.save().ok();
                 self.update_next_track();
+                return;
+            }
+            KeyCode::Char('L') => {
+                self.config.show_lyrics = !self.config.show_lyrics;
+                self.config.save().ok();
                 return;
             }
             KeyCode::Char('a') => {
@@ -1460,11 +1480,15 @@ impl App {
                 _ => {}
             },
             ViewMode::NowPlaying => match key.code {
-                KeyCode::Left => {
-                    self.audio.seek_relative(-5);
+                KeyCode::Left | KeyCode::Char('h') => {
+                    self.prev_track();
                 }
-                KeyCode::Right => {
-                    self.audio.seek_relative(5);
+                KeyCode::Right | KeyCode::Char('l') => {
+                    self.next_track();
+                }
+                KeyCode::Char('L') => {
+                    self.config.show_lyrics = !self.config.show_lyrics;
+                    self.config.save().ok();
                 }
                 _ => {}
             },
@@ -2079,6 +2103,13 @@ impl App {
             }
             ViewMode::NowPlaying => {
                 if let Some(target) = &self.last_now_playing_target {
+                    if let Some(l_rect) = target.lyrics_rect {
+                        if is_inside(l_rect, x, y) {
+                            self.config.show_lyrics = !self.config.show_lyrics;
+                            self.config.save().ok();
+                            return;
+                        }
+                    }
                     if is_inside(target.waveform_rect, x, y) {
                         let ratio = relative_x_ratio(target.waveform_rect, x);
                         let total = self.audio.total_duration().as_secs_f32();

@@ -36,10 +36,16 @@ pub struct AppConfig {
     pub visualizer_fps: u64,
     #[serde(default = "default_theme")]
     pub theme: String,
+    #[serde(default = "default_show_lyrics")]
+    pub show_lyrics: bool,
 }
 
 fn default_theme() -> String {
     "auto".to_string()
+}
+
+fn default_show_lyrics() -> bool {
+    true
 }
 
 impl Default for AppConfig {
@@ -65,6 +71,7 @@ impl Default for AppConfig {
             visualizer_enabled: true,
             visualizer_fps: 30,
             theme: default_theme(),
+            show_lyrics: true,
         }
     }
 }

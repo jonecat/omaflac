@@ -36,6 +36,36 @@ pub struct SettingsView<'a> {
 }
 
 impl<'a> SettingsView<'a> {
+    fn render_button_cap(
+        &self,
+        buf: &mut Buffer,
+        x: u16,
+        y: u16,
+        label: &str,
+        fg_style: Style,
+        border_style: Style,
+    ) -> Rect {
+        let label_chars = label.chars().count() as u16;
+        let width = label_chars + 4;
+        let bg_color = self.theme.background;
+        let rect = Rect::new(x, y, width, 3);
+
+        for row in y..y + 3 {
+            for col in x..x + width {
+                buf[(col, row)].set_bg(bg_color);
+            }
+        }
+
+        let block = Block::default()
+            .borders(Borders::ALL)
+            .border_type(BorderType::Rounded)
+            .border_style(border_style.bg(bg_color))
+            .style(Style::default().bg(bg_color));
+        block.render(rect, buf);
+        buf.set_string(x + 2, y + 1, label, fg_style.bg(bg_color));
+        rect
+    }
+
     pub fn render_with_targets(
         &self,
         area: Rect,
@@ -117,13 +147,15 @@ impl<'a> SettingsView<'a> {
 
             let path_str = folder.display().to_string();
             let label = format!(" ▪ {}", path_str);
-            let trunc: String = label.chars().take(inner.width.saturating_sub(12) as usize).collect();
+            let trunc: String = label.chars().take(inner.width.saturating_sub(16) as usize).collect();
             buf.set_string(inner.left(), y, &trunc, style);
 
             // Remove button [X]
-            let remove_btn_x = inner.right().saturating_sub(10);
-            let remove_rect = Rect::new(remove_btn_x, y, 9, 1);
-            buf.set_string(remove_btn_x, y, "[Remove]", Style::default().fg(self.theme.red));
+            let remove_label = "[ ✕ Remove ]";
+            let remove_w = remove_label.chars().count() as u16;
+            let remove_btn_x = inner.right().saturating_sub(remove_w + 1);
+            let remove_rect = Rect::new(remove_btn_x, y, remove_w, 1);
+            buf.set_string(remove_btn_x, y, remove_label, Style::default().fg(self.theme.red));
             targets.push(SettingsClickTarget {
                 rect: remove_rect,
                 action: SettingsAction::RemoveFolder(i),
@@ -138,77 +170,100 @@ impl<'a> SettingsView<'a> {
         }
 
         y += 1;
-        // Add Folder input & button
+        // Add Folder input & buttons
         if self.is_entering_folder {
             buf.set_string(inner.left() + 1, y, "Enter directory path: ", self.theme.primary_text());
             y += 1;
-            let input_rect = Rect::new(inner.left() + 1, y, inner.width.saturating_sub(17), 1);
+            let input_width = inner.width.saturating_sub(18).max(10);
+            let input_rect = Rect::new(inner.left() + 1, y + 1, input_width, 1);
             for x in input_rect.left()..input_rect.right() {
-                buf[(x, y)].set_bg(self.theme.selection);
+                buf[(x, y + 1)].set_bg(self.theme.selection);
             }
             let input_text = format!(" {}█", self.new_folder_input);
-            buf.set_string(inner.left() + 1, y, &input_text, self.theme.accent_text());
+            buf.set_string(inner.left() + 1, y + 1, &input_text, self.theme.accent_text());
 
-            let add_btn_x = input_rect.right() + 2;
-            let add_rect = Rect::new(add_btn_x, y, 10, 1);
-            buf.set_string(add_btn_x, y, "[Confirm]", self.theme.accent_text());
-            targets.push(SettingsClickTarget {
-                rect: add_rect,
-                action: SettingsAction::AddFolder,
-            });
-            y += 2;
-        } else {
-            let add_rect = Rect::new(inner.left(), y, 18, 1);
-            buf.set_string(
-                inner.left(),
+            let confirm_rect = self.render_button_cap(
+                buf,
+                input_rect.right() + 2,
                 y,
-                " + [Add Folder...]",
-                Style::default()
-                    .fg(self.theme.cyan)
-                    .add_modifier(Modifier::BOLD),
+                "Confirm",
+                Style::default().fg(self.theme.accent).add_modifier(Modifier::BOLD),
+                self.theme.block_focus_style(),
             );
             targets.push(SettingsClickTarget {
-                rect: add_rect,
+                rect: confirm_rect,
                 action: SettingsAction::AddFolder,
             });
-            y += 2;
+            y += 4;
+        } else {
+            let add_label = "+ Add Folder";
+            let add_fg = Style::default().fg(self.theme.cyan).add_modifier(Modifier::BOLD);
+            let add_border = self.theme.block_style();
+
+            let (sync_label, sync_fg, sync_border) = if self.is_scanning {
+                ("⟳ Syncing...", Style::default().fg(self.theme.yellow).add_modifier(Modifier::BOLD), self.theme.block_focus_style())
+            } else {
+                ("⟳ Sync Library (s)", Style::default().fg(self.theme.accent).add_modifier(Modifier::BOLD), self.theme.block_style())
+            };
+
+            let (full_label, full_fg, full_border) = if self.is_scanning {
+                ("Full Rescan (S)", self.theme.muted_text(), self.theme.block_style())
+            } else {
+                ("Full Rescan (S)", self.theme.secondary_text(), self.theme.block_style())
+            };
+
+            let add_w = (add_label.chars().count() as u16) + 4;
+            let sync_w = (sync_label.chars().count() as u16) + 4;
+            let full_w = (full_label.chars().count() as u16) + 4;
+
+            if inner.width >= add_w + sync_w + full_w + 6 {
+                let mut btn_x = inner.left() + 1;
+                let add_rect = self.render_button_cap(buf, btn_x, y, add_label, add_fg, add_border);
+                targets.push(SettingsClickTarget {
+                    rect: add_rect,
+                    action: SettingsAction::AddFolder,
+                });
+                btn_x += add_rect.width + 2;
+
+                let sync_rect = self.render_button_cap(buf, btn_x, y, sync_label, sync_fg, sync_border);
+                targets.push(SettingsClickTarget {
+                    rect: sync_rect,
+                    action: SettingsAction::ScanLibrary,
+                });
+                btn_x += sync_rect.width + 2;
+
+                let full_rect = self.render_button_cap(buf, btn_x, y, full_label, full_fg, full_border);
+                targets.push(SettingsClickTarget {
+                    rect: full_rect,
+                    action: SettingsAction::FullRescanLibrary,
+                });
+                y += 4;
+            } else {
+                let add_rect = self.render_button_cap(buf, inner.left() + 1, y, add_label, add_fg, add_border);
+                targets.push(SettingsClickTarget {
+                    rect: add_rect,
+                    action: SettingsAction::AddFolder,
+                });
+                y += 4;
+
+                let mut btn_x = inner.left() + 1;
+                let sync_rect = self.render_button_cap(buf, btn_x, y, sync_label, sync_fg, sync_border);
+                targets.push(SettingsClickTarget {
+                    rect: sync_rect,
+                    action: SettingsAction::ScanLibrary,
+                });
+                btn_x += sync_rect.width + 2;
+
+                let full_rect = self.render_button_cap(buf, btn_x, y, full_label, full_fg, full_border);
+                targets.push(SettingsClickTarget {
+                    rect: full_rect,
+                    action: SettingsAction::FullRescanLibrary,
+                });
+                y += 4;
+            }
         }
 
-        // Sync & Full Rescan buttons + status
-        let sync_btn_label = if self.is_scanning {
-            " ⟳ [Syncing Library...]"
-        } else {
-            " ⟳ [Sync Library (s)]"
-        };
-        let sync_w = sync_btn_label.chars().count() as u16;
-        let sync_rect = Rect::new(inner.left(), y, sync_w, 1);
-        buf.set_string(inner.left(), y, sync_btn_label, self.theme.accent_text());
-        targets.push(SettingsClickTarget {
-            rect: sync_rect,
-            action: SettingsAction::ScanLibrary,
-        });
-
-        let full_btn_x = inner.left() + sync_w + 3;
-        let full_btn_label = "[Full Rescan (S)]";
-        let full_w = full_btn_label.chars().count() as u16;
-        let full_rect = Rect::new(full_btn_x, y, full_w, 1);
-        buf.set_string(
-            full_btn_x,
-            y,
-            full_btn_label,
-            if self.is_scanning {
-                self.theme.muted_text()
-            } else {
-                self.theme.secondary_text()
-            },
-        );
-        targets.push(SettingsClickTarget {
-            rect: full_rect,
-            action: SettingsAction::FullRescanLibrary,
-        });
-
         if !self.scan_status.is_empty() {
-            y += 1;
             let status_trunc: String = self
                 .scan_status
                 .chars()
@@ -220,12 +275,13 @@ impl<'a> SettingsView<'a> {
                 &status_trunc,
                 Style::default().fg(self.theme.yellow),
             );
+            y += 2;
+        } else {
+            y += 1;
         }
 
-        y += 2;
-
         // Section: Appearance & Theme
-        if y < inner.bottom().saturating_sub(6) {
+        if y < inner.bottom().saturating_sub(8) {
             buf.set_string(
                 inner.left() + 1,
                 y,
@@ -236,24 +292,23 @@ impl<'a> SettingsView<'a> {
 
             let theme_label = format!("• Active Theme: {}", self.theme.name);
             buf.set_string(inner.left() + 1, y, &theme_label, self.theme.primary_text());
-
-            let cycle_btn = "[Cycle Theme (t)]";
-            let btn_x = inner.left() + 1 + (theme_label.chars().count() as u16) + 3;
-            if btn_x + (cycle_btn.chars().count() as u16) < inner.right() {
-                buf.set_string(
-                    btn_x,
-                    y,
-                    cycle_btn,
-                    Style::default()
-                        .fg(self.theme.cyan)
-                        .add_modifier(Modifier::BOLD),
-                );
-                targets.push(SettingsClickTarget {
-                    rect: Rect::new(btn_x, y, cycle_btn.chars().count() as u16, 1),
-                    action: SettingsAction::CycleTheme,
-                });
-            }
             y += 2;
+
+            let cycle_rect = self.render_button_cap(
+                buf,
+                inner.left() + 1,
+                y,
+                "Cycle Theme (t)",
+                Style::default()
+                    .fg(self.theme.cyan)
+                    .add_modifier(Modifier::BOLD),
+                self.theme.block_style(),
+            );
+            targets.push(SettingsClickTarget {
+                rect: cycle_rect,
+                action: SettingsAction::CycleTheme,
+            });
+            y += 4;
         }
 
         // Section: Application Version & Updates
@@ -310,7 +365,7 @@ impl<'a> SettingsView<'a> {
                         .unwrap_or_default();
                     (
                         format!(
-                            "• Status: ↑ Update available: v{}{} — click [Update OmaFLAC Now] or press U",
+                            "• Status: ↑ Update available: v{}{} — click [Update OmaFLAC (U)] or press U",
                             latest_version, c
                         ),
                         Style::default()
@@ -326,7 +381,7 @@ impl<'a> SettingsView<'a> {
                 ),
                 UpdateStatus::UpdatedReadyToRestart { new_version } => (
                     format!(
-                        "• Status: ✓ Updated to {}! Click [Restart OmaFLAC] or press R to launch new version.",
+                        "• Status: ✓ Updated to {}! Click [Restart OmaFLAC (R)] or press R to launch new version.",
                         new_version
                     ),
                     Style::default()
@@ -353,101 +408,87 @@ impl<'a> SettingsView<'a> {
             );
 
             let check_label = if matches!(self.update_status, UpdateStatus::Checking) {
-                " ⟳ [Checking...]"
+                "⟳ Checking..."
             } else {
-                " ⟳ [Check for Updates (u)]"
+                "⟳ Check for Updates (u)"
             };
-            let check_w = check_label.chars().count() as u16;
-            let check_rect = Rect::new(inner.left(), y, check_w, 1);
-            buf.set_string(
-                inner.left(),
-                y,
-                check_label,
-                if is_busy {
-                    self.theme.muted_text()
-                } else {
+            let (check_fg, check_border) = if is_busy {
+                (self.theme.muted_text(), self.theme.block_style())
+            } else {
+                (
                     Style::default()
                         .fg(self.theme.cyan)
-                        .add_modifier(Modifier::BOLD)
-                },
+                        .add_modifier(Modifier::BOLD),
+                    self.theme.block_style(),
+                )
+            };
+
+            let mut btn_x = inner.left() + 1;
+            let check_rect = self.render_button_cap(
+                buf,
+                btn_x,
+                y,
+                check_label,
+                check_fg,
+                check_border,
             );
             targets.push(SettingsClickTarget {
                 rect: check_rect,
                 action: SettingsAction::CheckUpdate,
             });
+            btn_x += check_rect.width + 2;
 
-            let btn2_x = inner.left() + check_w + 3;
             if matches!(
                 self.update_status,
                 UpdateStatus::UpdatedReadyToRestart { .. }
             ) {
-                let restart_label = "[ ↻ Restart OmaFLAC Now (R) ]";
-                let restart_w = restart_label.chars().count() as u16;
-                let restart_rect = Rect::new(btn2_x, y, restart_w, 1);
-                buf.set_string(
-                    btn2_x,
+                let restart_label = "↻ Restart OmaFLAC (R)";
+                let restart_rect = self.render_button_cap(
+                    buf,
+                    btn_x,
                     y,
                     restart_label,
                     Style::default()
                         .fg(self.theme.accent)
                         .add_modifier(Modifier::BOLD),
+                    self.theme.block_focus_style(),
                 );
                 targets.push(SettingsClickTarget {
                     rect: restart_rect,
                     action: SettingsAction::RestartApp,
                 });
             } else {
-                let update_label = if matches!(self.update_status, UpdateStatus::Updating { .. }) {
-                    "[ ↑ Updating OmaFLAC... ]"
+                let (update_label, update_fg, update_border) = if matches!(self.update_status, UpdateStatus::Updating { .. }) {
+                    ("↑ Updating OmaFLAC...", self.theme.muted_text(), self.theme.block_style())
+                } else if matches!(self.update_status, UpdateStatus::UpdateAvailable { .. }) {
+                    (
+                        "↑ Update OmaFLAC (U)",
+                        Style::default()
+                            .fg(self.theme.accent)
+                            .add_modifier(Modifier::BOLD),
+                        self.theme.block_focus_style(),
+                    )
                 } else {
-                    "[ ↑ Update OmaFLAC Now (U) ]"
+                    (
+                        "↑ Update OmaFLAC (U)",
+                        self.theme.secondary_text(),
+                        self.theme.block_style(),
+                    )
                 };
-                let update_w = update_label.chars().count() as u16;
-                let update_rect = Rect::new(btn2_x, y, update_w, 1);
-                let update_style = if is_busy {
-                    self.theme.muted_text()
-                } else if matches!(
-                    self.update_status,
-                    UpdateStatus::UpdateAvailable { .. }
-                ) {
-                    Style::default()
-                        .fg(self.theme.accent)
-                        .add_modifier(Modifier::BOLD)
-                } else {
-                    self.theme.secondary_text()
-                };
-                buf.set_string(btn2_x, y, update_label, update_style);
+
+                let update_rect = self.render_button_cap(
+                    buf,
+                    btn_x,
+                    y,
+                    update_label,
+                    update_fg,
+                    update_border,
+                );
                 targets.push(SettingsClickTarget {
                     rect: update_rect,
                     action: SettingsAction::RunUpdate,
                 });
             }
-
-            y += 3;
-        }
-
-        // Section: System & Audio Info
-        if y < inner.bottom().saturating_sub(3) {
-            buf.set_string(
-                inner.left() + 1,
-                y,
-                "SYSTEM & AUDIO SUBSYSTEM",
-                self.theme.accent_text(),
-            );
-            y += 1;
-            buf.set_string(
-                inner.left() + 1,
-                y,
-                "• Audio Engine: Symphonia (Bit-perfect multi-format decoder) + CPAL",
-                self.theme.secondary_text(),
-            );
-            y += 1;
-            buf.set_string(
-                inner.left() + 1,
-                y,
-                "• Codecs Supported: FLAC, MP3, OGG Vorbis/Opus, WAV, AIFF, M4A/AAC, ALAC",
-                self.theme.secondary_text(),
-            );
         }
 
         targets

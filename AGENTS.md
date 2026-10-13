@@ -40,6 +40,11 @@ omaflac/
     │   ├── visualizer.rs           # VisualizerBridge, real-time lock-free FFT buffer & smoothing
     │   └── waveform.rs             # Background audio amplitude dynamics pre-calculation & caching
     │
+    ├── lyrics/                     # Synchronized lyrics subsystem
+    │   ├── mod.rs                  # LyricsManager facade, background worker & channel polling
+    │   ├── lrc.rs                  # .lrc timestamp parser & sliding window logic
+    │   └── client.rs               # LRCLIB API client, disk cache & negative caching
+    │
     ├── library/                    # Music library, metadata, and playlist persistence
     │   ├── mod.rs                  # Library struct (tracks collection, search indexing, hierarchy)
     │   ├── track.rs                # Track struct (path, title, artist, album, duration, audio format)
@@ -54,7 +59,7 @@ omaflac/
         ├── waveform_widget.rs      # btop-style 2x4 Braille matrix (U+2800..U+28FF) waveform widget
         ├── components/
         │   ├── header.rs           # Top bar: stylized "OmaFLAC" title, search, update & status badges
-        │   ├── sidebar.rs          # Left navigation: Artists, Albums, Songs, Now Playing, Playlists
+        │   ├── sidebar.rs          # Left navigation: Artists, Albums, Songs, Visualizer, Playlists
         │   ├── player_bar.rs       # Persistent bottom player bar: controls, progress line, volume
         │   ├── about_modal.rs      # Stylized ASCII art "About OmaFLAC" modal dialog
         │   ├── folder_dialog.rs    # Interactive "Add Library Folder" modal dialog
@@ -65,7 +70,7 @@ omaflac/
             ├── albums_view.rs      # 2-column Album catalog & Songs browser
             ├── songs_view.rs       # Filterable track table with metadata & favorite stars
             ├── search_results_view.rs # 3-column instant search results (Artists, Albums, Songs)
-            ├── now_playing.rs      # Large album art, metadata, spectrum visualizer, compact waveform
+            ├── now_playing.rs      # Visualizer view: cover art, metadata, lyrics, FFT spectrum & waveform
             ├── playlists_view.rs   # Playlist manager and track listing
             ├── settings_view.rs    # Library directories management, rescan triggers, and updates
             └── file_browser.rs     # Standalone filesystem browser view
@@ -90,7 +95,7 @@ omaflac/
 - **Monochromatic Glyph Rule**: Never use colored emoji characters. Use monochrome Unicode glyphs styled with theme colors (`★`, `≡`, `◉`, `○`, `▪`, `▸`, `♪`, `♫`, `⟳`, `+`, `‖`, `⇄`, `↻`).
 - **Rounded Borders (`btop` Styling)**: All boxes, panels, modals, and dialogs strictly use `BorderType::Rounded` (`╭`, `╮`, `╯`, `╰`).
 - **Section Highlights**: Active/focused sections (`FocusArea::Sidebar`, `FocusArea::MainView`, `FocusArea::PlayerBar`) must highlight their borders with `theme.block_focus_style()` and title dots `●`.
-- **Side Nav Order**: Library order is strictly **Artists (1) → Albums (2) → Songs (3) → Now Playing (4)**. Default startup view is **Artists**.
+- **Side Nav Order**: Library order is strictly **Artists (1) → Albums (2) → Songs (3) → Visualizer (4)**. Default startup view is **Artists**.
 
 ### 4. Mouse & Keyboard Interaction Parity
 - Every clickable button, list item, or slider must register a click target struct during rendering (e.g., `PlayerClickTarget`, `SidebarClickTarget`, `ArtistsViewClickTarget`).

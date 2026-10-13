@@ -36,8 +36,8 @@ impl AboutModal {
         buf: &mut Buffer,
         theme: &OmarchyTheme,
     ) -> AboutModalClickTarget {
-        let width = 70u16.min(area.width.saturating_sub(4));
-        let height = 21u16.min(area.height.saturating_sub(2));
+        let width = 72u16.min(area.width.saturating_sub(4));
+        let height = 23u16.min(area.height.saturating_sub(2));
 
         let x = area.left() + (area.width.saturating_sub(width)) / 2;
         let y = area.top() + (area.height.saturating_sub(height)) / 2;
@@ -112,19 +112,39 @@ impl AboutModal {
             let sub_w = subtitle.chars().count() as u16;
             let sub_x = inner.left() + (inner.width.saturating_sub(sub_w)) / 2;
             buf.set_string(sub_x, cur_y, &subtitle, theme.secondary_text());
+            cur_y += 1;
+        }
+
+        // 3. Supported Codecs
+        if cur_y < inner.bottom() {
+            let prefix = if inner.width >= 65 {
+                "Supported Codecs: "
+            } else {
+                "Codecs: "
+            };
+            let codecs = "FLAC • MP3 • OGG • WAV • AIFF • M4A/AAC • ALAC";
+            let total_w = (prefix.chars().count() + codecs.chars().count()) as u16;
+            let start_x = inner.left() + (inner.width.saturating_sub(total_w)) / 2;
+            buf.set_string(start_x, cur_y, prefix, theme.secondary_text());
+            buf.set_string(
+                start_x + prefix.chars().count() as u16,
+                cur_y,
+                codecs,
+                Style::default().fg(theme.cyan).add_modifier(Modifier::BOLD),
+            );
             cur_y += 2;
         }
 
-        // 3. Divider
+        // 4. Divider
         if cur_y < inner.bottom() {
-            let div_w = inner.width.saturating_sub(10).min(54);
+            let div_w = inner.width.saturating_sub(10).min(56);
             let div_x = inner.left() + (inner.width.saturating_sub(div_w)) / 2;
             let div_str: String = "─".repeat(div_w as usize);
             buf.set_string(div_x, cur_y, &div_str, theme.block_style());
             cur_y += 2;
         }
 
-        // 4. Created by Jon Lawrence
+        // 5. Created by Jon Lawrence
         if cur_y < inner.bottom() {
             let author = "Created by Jon Lawrence";
             let auth_w = author.chars().count() as u16;
@@ -140,7 +160,7 @@ impl AboutModal {
             cur_y += 1;
         }
 
-        // 5. GitHub URL
+        // 6. GitHub URL
         if cur_y < inner.bottom() {
             let url = "https://github.com/jonecat/omaflac";
             let url_w = url.chars().count() as u16;
@@ -157,7 +177,7 @@ impl AboutModal {
             cur_y += 2;
         }
 
-        // 6. Close Button Cap
+        // 7. Close Button Cap (Outlined with rounded borders, no filled background)
         if cur_y + 3 <= inner.bottom() {
             let btn_label = " Close ";
             let btn_w = btn_label.chars().count() as u16 + 4;
@@ -165,14 +185,14 @@ impl AboutModal {
             close_rect = Rect::new(btn_x, cur_y, btn_w, 3);
             for by in cur_y..cur_y + 3 {
                 for bx in btn_x..btn_x + btn_w {
-                    buf[(bx, by)].set_bg(theme.selection);
+                    buf[(bx, by)].set_bg(theme.background);
                 }
             }
             let btn_block = Block::default()
                 .borders(Borders::ALL)
                 .border_type(BorderType::Rounded)
-                .border_style(theme.block_focus_style().bg(theme.selection))
-                .style(Style::default().bg(theme.selection));
+                .border_style(theme.block_focus_style())
+                .style(Style::default().bg(theme.background));
             btn_block.render(close_rect, buf);
             buf.set_string(
                 btn_x + 2,
@@ -180,7 +200,7 @@ impl AboutModal {
                 btn_label,
                 Style::default()
                     .fg(theme.accent)
-                    .bg(theme.selection)
+                    .bg(theme.background)
                     .add_modifier(Modifier::BOLD),
             );
         } else if cur_y < inner.bottom() {

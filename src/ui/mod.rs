@@ -23,7 +23,7 @@ use crate::ui::views::search_results_view::SearchResultsView;
 use crate::ui::views::settings_view::SettingsView;
 use crate::ui::views::songs_view::SongsView;
 use ratatui::layout::Rect;
-use ratatui::style::{Modifier, Style};
+use ratatui::style::{Color, Modifier, Style};
 use ratatui::widgets::{Block, BorderType, Borders, Widget};
 use ratatui::Frame;
 
@@ -207,6 +207,8 @@ pub fn render_app(frame: &mut Frame, app: &mut App) {
                 artwork_cache: &app.artwork_cache,
                 visualizer: app.audio.visualizer(),
                 waveform: waveform.as_ref(),
+                lyrics_status: Some(app.lyrics_manager.status()),
+                show_lyrics: app.config.show_lyrics,
                 is_focused: is_main_focused,
                 theme: &app.theme,
             };
@@ -302,6 +304,23 @@ pub fn render_app(frame: &mut Frame, app: &mut App) {
     app.last_player_targets = player_bar.render_with_targets(player_area, frame.buffer_mut());
 
     // 4. Overlays & Modals
+    let is_modal_active = app.playlist_dialog.is_some()
+        || app.folder_dialog.is_some()
+        || app.show_help
+        || app.show_about;
+
+    if is_modal_active {
+        let buf = frame.buffer_mut();
+        for y in area.top()..area.bottom() {
+            for x in area.left()..area.right() {
+                let cell = &mut buf[(x, y)];
+                cell.fg = darken_color(cell.fg, 0.35);
+                cell.bg = darken_color(cell.bg, 0.35);
+                cell.modifier.insert(Modifier::DIM);
+            }
+        }
+    }
+
     app.last_dialog_targets.clear();
     if let Some((mode, track)) = &app.playlist_dialog {
         let dialog = PlaylistDialog {
@@ -439,3 +458,15 @@ fn render_initial_loading(frame: &mut Frame, app: &App) {
         buf.set_string(inner.left() + 2, y, &footer, app.theme.muted_text());
     }
 }
+
+fn darken_color(color: Color, factor: f32) -> Color {
+    match color {
+        Color::Rgb(r, g, b) => Color::Rgb(
+            ((r as f32) * factor).round().clamp(0.0, 255.0) as u8,
+            ((g as f32) * factor).round().clamp(0.0, 255.0) as u8,
+            ((b as f32) * factor).round().clamp(0.0, 255.0) as u8,
+        ),
+        other => other,
+    }
+}
+
