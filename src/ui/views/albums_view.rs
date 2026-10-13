@@ -156,12 +156,12 @@ impl<'a> AlbumsView<'a> {
 
             let yr_str = album.year.map(|y| format!("{} • ", y)).unwrap_or_default();
             let meta = format!(" — {} ({}{} trk)", album.artist, yr_str, album.track_count);
-            let avail_w = inner.width as usize;
+            let avail_w = inner.width.saturating_sub(1) as usize;
             let meta_chars = meta.chars().count();
             let title_avail = avail_w.saturating_sub(meta_chars);
             let trunc_title: String = album.album.chars().take(title_avail.max(6)).collect();
 
-            let full_line = format!("{}{}", trunc_title, meta);
+            let full_line = format!(" {}{}", trunc_title, meta);
             let trunc_line: String = full_line.chars().take(inner.width as usize).collect();
             buf.set_string(inner.left(), y, &trunc_line, style);
         }
@@ -274,18 +274,18 @@ impl<'a> AlbumsView<'a> {
                 .unwrap_or_else(|| format!("{:02}. ", actual_idx + 1));
             let duration_str = song.formatted_duration();
 
-            let prefix = format!("{} {}{}", play_prefix, fav_prefix, trk_num);
+            let prefix = format!(" {} {}{}", play_prefix, fav_prefix, trk_num);
             let prefix_chars = prefix.chars().count() as u16;
             let title_avail = inner
                 .width
-                .saturating_sub(prefix_chars + duration_str.len() as u16 + 2)
+                .saturating_sub(prefix_chars + duration_str.len() as u16 + 3)
                 as usize;
             let title: String = song.display_title().chars().take(title_avail).collect();
 
             let line = format!("{}{}", prefix, title);
             buf.set_string(inner.left(), y, &line, style);
 
-            let time_x = inner.right().saturating_sub(duration_str.len() as u16);
+            let time_x = inner.right().saturating_sub(duration_str.len() as u16 + 1);
             buf.set_string(time_x, y, &duration_str, self.theme.muted_text());
         }
         self.theme.render_scrollbar(

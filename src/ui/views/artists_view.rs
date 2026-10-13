@@ -135,7 +135,7 @@ impl<'a> ArtistsView<'a> {
                 }
             }
 
-            let text: String = artist.chars().take(inner1.width as usize).collect();
+            let text: String = format!(" {}", artist).chars().take(inner1.width as usize).collect();
             buf.set_string(inner1.left(), y, &text, style);
         }
         self.theme.render_scrollbar(
@@ -203,7 +203,7 @@ impl<'a> ArtistsView<'a> {
                 }
             }
 
-            let text: String = album.chars().take(inner2.width as usize).collect();
+            let text: String = format!(" {}", album).chars().take(inner2.width as usize).collect();
             buf.set_string(inner2.left(), y, &text, style);
         }
         self.theme.render_scrollbar(
@@ -280,18 +280,18 @@ impl<'a> ArtistsView<'a> {
             let trk_num = song.track_number.map(|n| format!("{:02}. ", n)).unwrap_or_default();
             let duration_str = song.formatted_duration();
 
-            let prefix = format!("{} {}{}", play_prefix, fav_prefix, trk_num);
+            let prefix = format!(" {} {}{}", play_prefix, fav_prefix, trk_num);
             let prefix_chars = prefix.chars().count() as u16;
             let title_avail = inner3
                 .width
-                .saturating_sub(prefix_chars + duration_str.len() as u16 + 2)
+                .saturating_sub(prefix_chars + duration_str.len() as u16 + 3)
                 as usize;
             let title: String = song.display_title().chars().take(title_avail).collect();
 
             let line = format!("{}{}", prefix, title);
             buf.set_string(inner3.left(), y, &line, style);
 
-            let time_x = inner3.right().saturating_sub(duration_str.len() as u16);
+            let time_x = inner3.right().saturating_sub(duration_str.len() as u16 + 1);
             buf.set_string(time_x, y, &duration_str, self.theme.muted_text());
         }
         self.theme.render_scrollbar(

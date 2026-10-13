@@ -223,6 +223,7 @@ info "Compiling OmaFLAC in release mode (this may take a minute)..."
 
 # 5. Install Binary
 mkdir -p "$INSTALL_DIR"
+rm -f "$INSTALL_DIR/$BIN_NAME"
 cp "$SRC_DIR/target/release/$BIN_NAME" "$INSTALL_DIR/$BIN_NAME"
 chmod +x "$INSTALL_DIR/$BIN_NAME"
 

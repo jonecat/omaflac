@@ -80,12 +80,12 @@ impl<'a> SongsView<'a> {
         let col_time_w = 7u16;
         let col_fmt_w = 7u16;
 
-        let remaining = inner.width.saturating_sub(col_fav_w + col_stat_w + col_time_w + col_fmt_w + 4);
+        let remaining = inner.width.saturating_sub(col_fav_w + col_stat_w + col_time_w + col_fmt_w + 5);
         let col_title_w = (remaining as f32 * 0.45) as u16;
         let col_artist_w = (remaining as f32 * 0.28) as u16;
         let col_album_w = remaining.saturating_sub(col_title_w + col_artist_w);
 
-        let col_fav_x = inner.left();
+        let col_fav_x = inner.left() + 1;
         let col_stat_x = col_fav_x + col_fav_w;
         let col_title_x = col_stat_x + col_stat_w;
         let col_artist_x = col_title_x + col_title_w + 1;

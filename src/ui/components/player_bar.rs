@@ -298,7 +298,7 @@ impl<'a> PlayerBar<'a> {
 
         // 2. Play / Pause: ╭─────╮ / │  ▶  │ / ╰─────╯
         let is_playing = self.playback_state == PlaybackState::Playing;
-        let play_sym = if is_playing { " ⏸ " } else { " ▶ " };
+        let play_sym = if is_playing { " ‖ " } else { " ▶ " };
         let play_rect = self.render_button_cap(
             buf,
             x,
@@ -349,13 +349,13 @@ impl<'a> PlayerBar<'a> {
         });
         x += next_rect.width + 2;
 
-        // 5. Shuffle: ╭────╮ / │ ⇄  │ / ╰────╯
+        // 5. Shuffle: ╭─────╮ / │  ⇄  │ / ╰─────╯
         let shuf_rect = self.render_button_cap(
             buf,
             x,
             y,
             btn_h,
-            "⇄ ",
+            " ⇄ ",
             if self.shuffle { active_ctrl_style } else { muted_ctrl_style },
             if self.shuffle { active_border } else { subtle_border },
             self.shuffle,
@@ -366,11 +366,11 @@ impl<'a> PlayerBar<'a> {
         });
         x += shuf_rect.width + 1;
 
-        // 6. Repeat: ╭────╮ / │ ↻  │ / ╰────╯
+        // 6. Repeat: ╭─────╮ / │  ↻  │ / ╰─────╯
         let rep_inner = match self.repeat_mode {
-            RepeatMode::Off => "↻ ",
-            RepeatMode::All => "↻  All",
-            RepeatMode::Track => "↻  1",
+            RepeatMode::Off => " ↻ ",
+            RepeatMode::All => " ↻ All ",
+            RepeatMode::Track => " ↻ 1 ",
         };
         let rep_active = self.repeat_mode != RepeatMode::Off;
         let rep_rect = self.render_button_cap(

@@ -177,11 +177,11 @@ impl<'a> SearchResultsView<'a> {
             }
 
             let meta = format!(" ({} alb, {} trk)", artist.album_count, artist.track_count);
-            let avail_w = inner.width as usize;
+            let avail_w = inner.width.saturating_sub(1) as usize;
             let name_avail = avail_w.saturating_sub(meta.chars().count());
             let trunc_name: String = artist.name.chars().take(name_avail.max(6)).collect();
 
-            let full_line = format!("{}{}", trunc_name, meta);
+            let full_line = format!(" {}{}", trunc_name, meta);
             let trunc_line: String = full_line.chars().take(inner.width as usize).collect();
             buf.set_string(inner.left(), y, &trunc_line, style);
         }
@@ -277,11 +277,11 @@ impl<'a> SearchResultsView<'a> {
             }
 
             let meta = format!(" — {} ({} trk)", album.artist, album.track_count);
-            let avail_w = inner.width as usize;
+            let avail_w = inner.width.saturating_sub(1) as usize;
             let title_avail = avail_w.saturating_sub(meta.chars().count());
             let trunc_title: String = album.album.chars().take(title_avail.max(6)).collect();
 
-            let full_line = format!("{}{}", trunc_title, meta);
+            let full_line = format!(" {}{}", trunc_title, meta);
             let trunc_line: String = full_line.chars().take(inner.width as usize).collect();
             buf.set_string(inner.left(), y, &trunc_line, style);
         }
@@ -384,19 +384,19 @@ impl<'a> SearchResultsView<'a> {
             let fav_prefix = if is_fav { "★ " } else { "  " };
             let duration_str = track.formatted_duration();
 
-            let prefix = format!("{} {}", play_prefix, fav_prefix);
+            let prefix = format!(" {} {}", play_prefix, fav_prefix);
             let prefix_chars = prefix.chars().count() as u16;
             let title_artist = format!("{} — {}", track.display_title(), track.display_artist());
             let max_text_w = inner
                 .width
-                .saturating_sub(prefix_chars + duration_str.len() as u16 + 2)
+                .saturating_sub(prefix_chars + duration_str.len() as u16 + 3)
                 as usize;
             let trunc_ta: String = title_artist.chars().take(max_text_w).collect();
 
             let line = format!("{}{}", prefix, trunc_ta);
             buf.set_string(inner.left(), y, &line, style);
 
-            let time_x = inner.right().saturating_sub(duration_str.len() as u16);
+            let time_x = inner.right().saturating_sub(duration_str.len() as u16 + 1);
             buf.set_string(time_x, y, &duration_str, self.theme.muted_text());
         }
         self.theme.render_scrollbar(

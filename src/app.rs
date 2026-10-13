@@ -23,6 +23,7 @@ use crate::ui::views::now_playing::NowPlayingClickTarget;
 use crate::ui::views::playlists_view::PlaylistsViewClickTarget;
 use crate::ui::views::settings_view::{SettingsAction, SettingsClickTarget};
 use crate::ui::views::songs_view::SongsViewClickTarget;
+use crate::updater::{UpdateStatus, Updater};
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
 use rand::seq::SliceRandom;
 use ratatui::layout::Rect;
@@ -49,6 +50,7 @@ pub struct App {
     pub focus: FocusArea,
     pub sidebar_index: usize,
     pub should_quit: bool,
+    pub should_restart: bool,
 
     // Queue & playback
     pub playback_queue: Vec<Track>,
@@ -106,7 +108,7 @@ pub struct App {
     pub browser_selected_idx: usize,
     pub browser_scroll_offset: usize,
 
-    // Settings view state
+    // Settings & Updater state
     pub settings_selected_folder: usize,
     pub new_folder_input: String,
     pub is_entering_folder: bool,
@@ -115,6 +117,8 @@ pub struct App {
     pub scan_found_count: usize,
     pub initial_loading: bool,
     pub scan_receiver: Option<crossbeam_channel::Receiver<ScanUpdate>>,
+    pub update_status: crate::updater::UpdateStatus,
+    pub update_receiver: Option<crossbeam_channel::Receiver<crate::updater::UpdateStatus>>,
 
     // Mouse Hit Targets recorded from previous render frame
     pub last_main_area: Rect,
@@ -159,6 +163,7 @@ impl App {
         let browser_items = FileBrowserView::list_directory(&initial_dir);
 
         let theme = OmarchyTheme::load();
+        let update_receiver = Some(crate::updater::Updater::spawn_check());
 
         let mut app = Self {
             theme,
@@ -171,6 +176,7 @@ impl App {
             focus: FocusArea::MainView,
             sidebar_index: 0,
             should_quit: false,
+            should_restart: false,
             playback_queue: Vec::new(),
             queue_index: 0,
             is_muted: false,
@@ -219,6 +225,8 @@ impl App {
             scan_found_count: 0,
             initial_loading: needs_initial_scan,
             scan_receiver: None,
+            update_status: crate::updater::UpdateStatus::Checking,
+            update_receiver,
             last_main_area: Rect::default(),
             last_header_targets: None,
             last_sidebar_targets: Vec::new(),
@@ -248,6 +256,13 @@ impl App {
     pub fn on_tick(&mut self) {
         // Hot-reload theme if Omarchy desktop colors changed
         self.theme.refresh_if_changed();
+
+        // Check for updater events
+        if let Some(rx) = &self.update_receiver {
+            while let Ok(status) = rx.try_recv() {
+                self.update_status = status;
+            }
+        }
 
         // Check for library scanner events
         if let Some(rx) = &self.scan_receiver {
@@ -994,6 +1009,23 @@ impl App {
             }
             KeyCode::Char('b') if self.view_mode == ViewMode::Settings => {
                 self.open_folder_dialog(FolderDialogFocus::FolderList);
+                return;
+            }
+            KeyCode::Char('u') if self.view_mode == ViewMode::Settings => {
+                self.trigger_update_check();
+                return;
+            }
+            KeyCode::Char('U') if self.view_mode == ViewMode::Settings => {
+                self.trigger_app_update();
+                return;
+            }
+            KeyCode::Char('R') if self.view_mode == ViewMode::Settings => {
+                if matches!(
+                    self.update_status,
+                    crate::updater::UpdateStatus::UpdatedReadyToRestart { .. }
+                ) {
+                    self.trigger_restart();
+                }
                 return;
             }
             KeyCode::Char('f') => {
@@ -1747,6 +1779,18 @@ impl App {
                 self.show_help = true;
                 return;
             }
+            if hdr.update_rect.width > 0 && is_inside(hdr.update_rect, x, y) {
+                if matches!(
+                    self.update_status,
+                    crate::updater::UpdateStatus::UpdatedReadyToRestart { .. }
+                ) {
+                    self.trigger_restart();
+                } else {
+                    self.set_view(ViewMode::Settings);
+                    self.focus = FocusArea::MainView;
+                }
+                return;
+            }
             if is_inside(hdr.search_rect, x, y) {
                 if self.view_mode != ViewMode::SearchResults {
                     self.previous_view_mode = self.view_mode;
@@ -2032,6 +2076,15 @@ impl App {
                             }
                             SettingsAction::ScanLibrary => {
                                 self.trigger_scan();
+                            }
+                            SettingsAction::CheckUpdate => {
+                                self.trigger_update_check();
+                            }
+                            SettingsAction::RunUpdate => {
+                                self.trigger_app_update();
+                            }
+                            SettingsAction::RestartApp => {
+                                self.trigger_restart();
                             }
                         }
                         self.focus = FocusArea::MainView;
@@ -2319,5 +2372,37 @@ impl App {
                 Scanner::scan_directories_with_sender(&folders, tx);
             })
             .ok();
+    }
+
+    pub fn trigger_update_check(&mut self) {
+        if matches!(
+            self.update_status,
+            UpdateStatus::Checking | UpdateStatus::Updating { .. }
+        ) {
+            return;
+        }
+        self.update_status = UpdateStatus::Checking;
+        self.update_receiver = Some(Updater::spawn_check());
+    }
+
+    pub fn trigger_app_update(&mut self) {
+        if matches!(
+            self.update_status,
+            UpdateStatus::Checking | UpdateStatus::Updating { .. }
+        ) {
+            return;
+        }
+        self.update_status = UpdateStatus::Updating {
+            step: "Starting update...".to_string(),
+        };
+        self.update_receiver = Some(Updater::spawn_in_app_update());
+    }
+
+    pub fn trigger_restart(&mut self) {
+        self.config.save().ok();
+        self.playlists_manager.save().ok();
+        self.audio.stop();
+        self.should_restart = true;
+        self.should_quit = true;
     }
 }

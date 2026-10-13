@@ -76,11 +76,22 @@ pub fn render_app(frame: &mut Frame, app: &mut App) {
         ViewMode::SearchResults => "Search Results",
     };
 
+    let update_badge_str = match &app.update_status {
+        crate::updater::UpdateStatus::UpdateAvailable { latest_version, .. } => {
+            Some(format!("[↑ Update v{}]", latest_version))
+        }
+        crate::updater::UpdateStatus::UpdatedReadyToRestart { .. } => {
+            Some("[↻ Restart to Update]".to_string())
+        }
+        _ => None,
+    };
+
     let header_comp = HeaderComponent {
         view_title,
         total_tracks: app.library.tracks.len(),
         search_query: &app.search_query,
         is_searching: app.is_searching,
+        update_badge: update_badge_str.as_deref(),
         theme: &app.theme,
     };
     app.last_header_targets = Some(header_comp.render_with_targets(header_area, frame.buffer_mut()));
@@ -221,6 +232,7 @@ pub fn render_app(frame: &mut Frame, app: &mut App) {
                 is_entering_folder: app.is_entering_folder,
                 is_scanning: app.is_scanning,
                 scan_status: &app.scan_status,
+                update_status: &app.update_status,
                 is_focused: is_main_focused,
                 theme: &app.theme,
             };

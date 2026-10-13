@@ -22,12 +22,17 @@ Welcome to **OmaFLAC**! This document provides a concise, high-leverage architec
 omaflac/
 ├── Cargo.toml
 ├── Cargo.lock
+├── build.rs                        # Embeds compile-time Git commit hash (OMAFLAC_GIT_HASH)
+├── install.sh                      # Cross-platform installer & updater script
 ├── tests/
-│   └── library_test.rs             # Integration tests for library scanning & hierarchy
+│   ├── library_test.rs             # Integration tests for library scanning & hierarchy
+│   └── search_and_features_test.rs # Integration tests for search, two-pane albums, and artwork cache
 └── src/
-    ├── main.rs                     # Entry point: terminal setup, event loop (60 FPS tick)
+    ├── main.rs                     # Entry point: CLI commands, terminal setup, event loop
+    ├── lib.rs                      # Library crate root
     ├── app.rs                      # Core state machine (App), focus management, key/mouse routing
     ├── config.rs                   # AppConfig (~/.config/omaflac/config.json), repeat/shuffle modes
+    ├── updater.rs                  # Background GitHub version check & self-update engine
     │
     ├── audio/                      # Audio subsystem (Decoupled engine & threads)
     │   ├── mod.rs                  # AudioEngine public facade
@@ -48,18 +53,21 @@ omaflac/
         ├── spectrum.rs             # Real-time FFT frequency spectrum analyzer widget
         ├── waveform_widget.rs      # btop-style 2x4 Braille matrix (U+2800..U+28FF) waveform widget
         ├── components/
-        │   ├── header.rs           # Top bar: stylized "OmaFLAC" title, search, volume, badges
+        │   ├── header.rs           # Top bar: stylized "OmaFLAC" title, search, update & status badges
         │   ├── sidebar.rs          # Left navigation: Artists, Albums, Songs, Now Playing, Playlists
         │   ├── player_bar.rs       # Persistent bottom player bar: controls, progress line, volume
+        │   ├── about_modal.rs      # Stylized ASCII art "About OmaFLAC" modal dialog
+        │   ├── folder_dialog.rs    # Interactive "Add Library Folder" modal dialog
         │   ├── help_modal.rs       # F1 / ? controls overlay dialog
         │   └── playlist_dialog.rs  # Add-to-playlist / New-playlist modal dialog
         └── views/
             ├── artists_view.rs     # 3-column hierarchical browser (Artists → Albums → Songs)
-            ├── albums_view.rs      # Album catalog list view
+            ├── albums_view.rs      # 2-column Album catalog & Songs browser
             ├── songs_view.rs       # Filterable track table with metadata & favorite stars
+            ├── search_results_view.rs # 3-column instant search results (Artists, Albums, Songs)
             ├── now_playing.rs      # Large album art, metadata, spectrum visualizer, compact waveform
             ├── playlists_view.rs   # Playlist manager and track listing
-            ├── settings_view.rs    # Library directories management and rescan triggers
+            ├── settings_view.rs    # Library directories management, rescan triggers, and updates
             └── file_browser.rs     # Standalone filesystem browser view
 ```
 
@@ -79,7 +87,7 @@ omaflac/
 - Whenever the playlist, current track, repeat mode, or shuffle mode changes, `self.update_next_track()` must be called to update the predictive buffer.
 
 ### 3. Visual Styling & Omarchy Aesthetic
-- **Monochromatic Glyph Rule**: Never use colored emoji characters. Use monochrome Unicode glyphs styled with theme colors (`★`, `≡`, `◉`, `○`, `▪`, `▸`, `♪`, `♫`, `⟳`, `+`).
+- **Monochromatic Glyph Rule**: Never use colored emoji characters. Use monochrome Unicode glyphs styled with theme colors (`★`, `≡`, `◉`, `○`, `▪`, `▸`, `♪`, `♫`, `⟳`, `+`, `‖`, `⇄`, `↻`).
 - **Rounded Borders (`btop` Styling)**: All boxes, panels, modals, and dialogs strictly use `BorderType::Rounded` (`╭`, `╮`, `╯`, `╰`).
 - **Section Highlights**: Active/focused sections (`FocusArea::Sidebar`, `FocusArea::MainView`, `FocusArea::PlayerBar`) must highlight their borders with `theme.block_focus_style()` and title dots `●`.
 - **Side Nav Order**: Library order is strictly **Artists (1) → Albums (2) → Songs (3) → Now Playing (4)**. Default startup view is **Artists**.
@@ -104,8 +112,14 @@ cargo test
 
 ### Build & Install Release Binary
 ```bash
-cargo build --release
-cp target/release/omaflac ~/.local/bin/omaflac
+./install.sh
+```
+
+### Check Version & Self-Update via CLI
+```bash
+omaflac --version
+omaflac check-update
+omaflac update
 ```
 
 ### Run Player Locally

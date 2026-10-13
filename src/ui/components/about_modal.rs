@@ -106,8 +106,8 @@ impl AboutModal {
         // 2. Subtitle & Version
         if cur_y < inner.bottom() {
             let subtitle = format!(
-                "Audiophile Terminal Audio Player  •  v{}",
-                env!("CARGO_PKG_VERSION")
+                "Audiophile Terminal Audio Player  •  {}",
+                crate::updater::Updater::display_version()
             );
             let sub_w = subtitle.chars().count() as u16;
             let sub_x = inner.left() + (inner.width.saturating_sub(sub_w)) / 2;

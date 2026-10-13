@@ -232,7 +232,7 @@ impl<'a> PlaylistsView<'a> {
 
         let y_hdr = inner_r.top() + 1;
         let hdr_style = self.theme.muted_text().add_modifier(Modifier::BOLD);
-        buf.set_string(inner_r.left(), y_hdr, "#  TITLE", hdr_style);
+        buf.set_string(inner_r.left() + 1, y_hdr, "#  TITLE", hdr_style);
         let artist_x = inner_r.left() + (inner_r.width as f32 * 0.45) as u16;
         buf.set_string(artist_x, y_hdr, "ARTIST", hdr_style);
         let time_x = inner_r.right().saturating_sub(8);
@@ -273,7 +273,7 @@ impl<'a> PlaylistsView<'a> {
 
             let num_str = format!("{:>2}. ", actual_idx + 1);
             let prefix = if is_playing { "▶" } else { " " };
-            let line_prefix = format!("{}{}", prefix, num_str);
+            let line_prefix = format!(" {}{}", prefix, num_str);
             let prefix_chars = line_prefix.chars().count() as u16;
             buf.set_string(inner_r.left(), y, &line_prefix, style);
 

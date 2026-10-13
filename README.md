@@ -14,8 +14,8 @@
   - True **gapless transitions** with background track pre-buffering and lock-free boundary handoff.
   - Real-time linear **sample-rate interpolation** so 44.1 kHz, 88.2 kHz, 96 kHz, and 192 kHz lossless tracks play at exact pitch and speed on 48 kHz+ output devices across **Linux** (PipeWire, PulseAudio, ALSA) and **macOS** (CoreAudio).
 - **Full Keyboard & Mouse Parity**:
-  - Every control—3-row tactile transport buttons (`|◁`, `▶`/`⏸`, `■`, `▷|`, `⇄`, `↻`), waveform seekbar, volume slider, sidebar navigation, and modals—supports both mouse clicks/scrolling and fast Vim-style keyboard navigation (`j`/`k`, `h`/`l`, `Tab`, `Space`, `/`).
-  - Click **`♬ OmaFLAC`** in the top bar at any time to open the **About OmaFLAC** modal featuring stylized ASCII art and a clickable link to the GitHub repository.
+  - Every control—3-row tactile transport buttons (`|◁`, `▶`/`‖`, `■`, `▷|`, `⇄`, `↻`), waveform seekbar, volume slider, sidebar navigation, and modals—supports both mouse clicks/scrolling and fast Vim-style keyboard navigation (`j`/`k`, `h`/`l`, `Tab`, `Space`, `/`).
+  - Click **`♬ OmaFLAC`** in the top bar at any time to open the **About OmaFLAC** modal featuring stylized ASCII art, build version + Git commit hash, and a clickable link to the GitHub repository.
 - **24-bit Truecolor Album Artwork**:
   - Extracts embedded artwork tags (ID3v2 APIC, FLAC picture blocks, MP4 `covr`) and detects folder covers (`cover.jpg`, `folder.png`, etc.).
   - Renders crisp album covers using an adaptive half-block (`▀`) 24-bit RGB renderer and protocol-aware terminal image engine (Kitty, Sixel, iTerm2, Ghostty, WezTerm, Alacritty, Foot).
@@ -27,17 +27,20 @@
   - Renders a `btop`-style 2×4 Braille matrix (`U+2800..U+28FF`) waveform with played vs. unplayed color coding and instant click-to-seek.
 - **Hierarchical Library & Playlists**:
   - **Artists (`1`)**: 3-column hierarchical browser (**Artists → Albums → Songs**).
-  - **Albums (`2`)**: Full album catalog with release years and track counts.
+  - **Albums (`2`)**: Two-pane album catalog and tracklist browser.
   - **Songs (`3`)**: Filterable library table with track metadata, duration, format badges, and favorite stars (`★`).
   - **Visualizer (`4`)**: Large album cover art, lossless format/sample-rate/bit-depth readout, live FFT spectrum analyzer, and compact track waveform.
   - **Playlists (`5`)**: Built-in **★ Favorites**, **◷ Recently Played**, and custom user playlists (`a` to add tracks, `n` to create playlists, `d` to remove tracks).
-  - **Settings (`6`)**: Manage library folders via an interactive **Add Library Folder** modal (combining direct path typing with a scrollable directory explorer and quick-jump buttons) and trigger instant background library rescans.
+  - **Settings (`6`)**: Manage library folders via an interactive **Add Library Folder** modal, trigger background library rescans, and check/install **Application Updates** directly inside the TUI.
+- **Built-In Version Checker & Self-Updater**:
+  - Non-blocking background check against GitHub on startup; displays a clickable `[↑ Update v...]` badge in the top bar when a newer release or commit is available.
+  - Update in-app from **Settings (`6`)** while music continues playing, or from the terminal via `omaflac update`.
 - **Global Instant Search**:
-  - Press `/` or click the top search bar to filter across Title, Artist, Album, and Genre in real time.
+  - Press `/` or click the top search bar to filter across Artists, Albums, and Songs in real time.
 
 ---
 
-## 🚀 Quick Install (Linux & macOS)
+## 🚀 Quick Install & Updating (Linux & macOS)
 
 Install `OmaFLAC` with a single command on **Linux** or **macOS**:
 
@@ -49,6 +52,26 @@ The installer script automatically:
 1. Detects your operating system (**Linux** distro or **macOS**) and architecture.
 2. Verifies required build tools (`git`, C compiler, `cargo`/`rustc`, and `pkg-config` + ALSA headers on Linux) and prints exact, copy-pasteable commands for your OS/distro if anything needs to be installed first.
 3. Clones and compiles an optimized release binary (`cargo build --release`) and installs it to `~/.local/bin/omaflac`.
+
+### 🔄 Checking for Updates & Self-Updating
+
+`OmaFLAC` embeds both its semantic version and Git commit hash at compile time and supports updating from either the CLI or inside the application:
+
+```bash
+# Print installed version and Git commit hash
+omaflac --version
+
+# Check GitHub for a newer release or commit
+omaflac check-update
+
+# Download, compile, and install the latest version from GitHub
+omaflac update
+
+# Force a clean rebuild & reinstall of the latest version
+omaflac update --force
+```
+
+Inside the TUI, navigate to **Settings (`6`)** (or click the **`[↑ Update]`** badge in the header when available) to check for updates (`u`), download & compile the latest update in the background (`U`), and seamlessly restart into the new binary (`R`).
 
 ---
 
@@ -111,7 +134,7 @@ omaflac
 
 | Action | Shortcut / Mouse |
 | :--- | :--- |
-| **Play / Pause** | `Space` or click `▶` / `⏸` |
+| **Play / Pause** | `Space` or click `▶` / `‖` |
 | **Stop** | `s` or click `■` |
 | **Next Track** | `n` or click `▷\|` |
 | **Previous Track** | `p` or click `\|◁` |
@@ -127,9 +150,10 @@ omaflac
 | **Cycle Focus Area** | `Tab` / `Shift+Tab` |
 | **Direct View Shortcuts** | `1` Artists, `2` Albums, `3` Songs, `4` Visualizer, `5` Playlists, `6` Settings |
 | **Navigate Lists** | `j` / `k` or `↑` / `↓` or mouse wheel |
-| **Switch Columns (Artists View)** | `h` / `l` or `←` / `→` or click column |
-| **Play Selected Item** | `Enter` or click row |
+| **Switch Columns (Artists / Albums / Search)** | `h` / `l` or `←` / `→` or click column |
+| **Play Selected Item** | `Enter` or double-click row |
 | **Remove Track / Folder** | `d` or `Delete` |
+| **Check / Install Updates (Settings)** | `u` Check, `U` Install Update, `R` Restart |
 | **About OmaFLAC Modal** | Click `♬ OmaFLAC` in the top header bar |
 | **Open Help Overlay** | `?` or `F1` or click `[? Help]` |
 | **Quit** | `q` or `Ctrl+C` |
@@ -149,43 +173,49 @@ omaflac
 ## 🏗️ Architecture
 
 ```text
-src/
-├── main.rs                         # Terminal setup, raw mode, mouse capture, 60 FPS event loop
-├── app.rs                          # Core App state machine, focus routing, keyboard & mouse handlers
-├── config.rs                       # Persistent configuration (~/.config/omaflac/config.json)
-├── audio/
-│   ├── mod.rs                      # AudioEngine public facade
-│   ├── player.rs                   # CPAL output stream, Symphonia decoder, gapless queue & resampler
-│   ├── visualizer.rs               # Lock-free 1024-point FFT audio bridge & smoothing physics
-│   └── waveform.rs                 # Background track dynamics analyzer & waveform cache
-├── library/
-│   ├── mod.rs                      # In-memory library catalog, search index, Artist/Album hierarchy
-│   ├── track.rs                    # Track metadata model & lossless format descriptors
-│   ├── scanner.rs                  # Multithreaded recursive directory scanner (walkdir + lofty)
-│   └── playlist.rs                 # PlaylistsManager for Favorites, Recently Played & custom playlists
-└── ui/
-    ├── mod.rs                      # Root layout, bordered header, view dispatcher & modal overlays
-    ├── theme.rs                    # Omarchy color palette, rounded block helpers & typography
-    ├── artwork.rs                  # 24-bit RGB half-block & terminal protocol album cover renderer
-    ├── spectrum.rs                 # Real-time FFT frequency spectrum analyzer widget
-    ├── waveform_widget.rs          # 2x4 Braille matrix track waveform widget
-    ├── mouse.rs                    # Mouse hit-testing utilities
-    ├── components/
-    │   ├── header.rs               # Top bar: clickable OmaFLAC logo, global search, status badges
-    │   ├── sidebar.rs              # Navigation panel: Artists, Albums, Songs, Visualizer, Playlists
-    │   ├── player_bar.rs           # Bottom deck: 3-row transport buttons, seekbar & volume
-    │   ├── about_modal.rs          # Stylized ASCII art "About OmaFLAC" modal dialog
-    │   ├── folder_dialog.rs        # Interactive "Add Library Folder" path input & directory browser modal
-    │   ├── playlist_dialog.rs      # Add-to-playlist / New-playlist modal dialog
-    │   └── help_modal.rs           # Keyboard & mouse controls reference overlay
-    └── views/
-        ├── artists_view.rs         # 3-column hierarchical browser (Artists → Albums → Songs)
-        ├── albums_view.rs          # Album catalog view
-        ├── songs_view.rs           # Filterable track table with favorite stars
-        ├── now_playing.rs          # Visualizer view: cover art, metadata, FFT spectrum & waveform
-        ├── playlists_view.rs       # Playlist manager and track listing
-        ├── settings_view.rs        # Library folder management & rescan controls
-        └── file_browser.rs         # Standalone filesystem browser view
+omaflac/
+├── build.rs                            # Embeds compile-time Git commit hash (OMAFLAC_GIT_HASH)
+├── install.sh                          # Cross-platform installer & updater script (Linux & macOS)
+└── src/
+    ├── main.rs                         # CLI flags (--version, check-update, update), TUI setup & loop
+    ├── lib.rs                          # Library crate root
+    ├── app.rs                          # Core App state machine, focus routing, keyboard & mouse handlers
+    ├── config.rs                       # Persistent configuration (~/.config/omaflac/config.json)
+    ├── updater.rs                      # Background GitHub version checker & self-updater engine
+    ├── audio/
+    │   ├── mod.rs                      # AudioEngine public facade
+    │   ├── player.rs                   # CPAL output stream, Symphonia decoder, gapless queue & resampler
+    │   ├── visualizer.rs               # Lock-free 1024-point FFT audio bridge & smoothing physics
+    │   └── waveform.rs                 # Background track dynamics analyzer & waveform cache
+    ├── library/
+    │   ├── mod.rs                      # In-memory library catalog, search index, Artist/Album hierarchy
+    │   ├── track.rs                    # Track metadata model & lossless format descriptors
+    │   ├── scanner.rs                  # Multithreaded recursive directory scanner (walkdir + lofty)
+    │   └── playlist.rs                 # PlaylistsManager for Favorites, Recently Played & custom playlists
+    └── ui/
+        ├── mod.rs                      # Root layout, bordered header, view dispatcher & modal overlays
+        ├── theme.rs                    # Omarchy color palette, rounded block helpers & typography
+        ├── artwork.rs                  # 24-bit RGB half-block & terminal protocol album cover renderer
+        ├── spectrum.rs                 # Real-time FFT frequency spectrum analyzer widget
+        ├── waveform_widget.rs          # 2x4 Braille matrix track waveform widget
+        ├── mouse.rs                    # Mouse hit-testing utilities
+        ├── components/
+        │   ├── header.rs               # Top bar: clickable OmaFLAC logo, global search, update & status badges
+        │   ├── sidebar.rs              # Navigation panel: Artists, Albums, Songs, Visualizer, Playlists
+        │   ├── player_bar.rs           # Bottom deck: 3-row transport buttons, seekbar & volume
+        │   ├── about_modal.rs          # Stylized ASCII art "About OmaFLAC" modal dialog
+        │   ├── folder_dialog.rs        # Interactive "Add Library Folder" path input & directory browser modal
+        │   ├── playlist_dialog.rs      # Add-to-playlist / New-playlist modal dialog
+        │   └── help_modal.rs           # Keyboard & mouse controls reference overlay
+        └── views/
+            ├── artists_view.rs         # 3-column hierarchical browser (Artists → Albums → Songs)
+            ├── albums_view.rs          # 2-column Album catalog & Songs browser
+            ├── songs_view.rs           # Filterable track table with favorite stars
+            ├── search_results_view.rs  # 3-column instant search results (Artists, Albums, Songs)
+            ├── now_playing.rs          # Visualizer view: cover art, metadata, FFT spectrum & waveform
+            ├── playlists_view.rs       # Playlist manager and track listing
+            ├── settings_view.rs        # Library folder management, rescan & application updates
+            └── file_browser.rs         # Standalone filesystem browser view
 ```
 
 ---
