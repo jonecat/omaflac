@@ -101,23 +101,31 @@ impl<'a> HeaderComponent<'a> {
             let search_bg = if self.is_searching || !self.search_query.is_empty() {
                 self.theme.selection
             } else {
-                self.theme.background
+                self.theme.lighter_background
             };
 
             let (search_str, search_style) = if self.is_searching {
                 (
-                    format!(" ⌕ {}█", self.search_query),
-                    Style::default().bg(search_bg).fg(self.theme.accent).add_modifier(Modifier::BOLD),
+                    format!(" [ ⌕ {}█ ]", self.search_query),
+                    Style::default()
+                        .bg(search_bg)
+                        .fg(self.theme.accent)
+                        .add_modifier(Modifier::BOLD),
                 )
             } else if !self.search_query.is_empty() {
                 (
-                    format!(" ⌕ {} [/]", self.search_query),
-                    Style::default().bg(search_bg).fg(self.theme.foreground),
+                    format!(" [ ⌕ {} [/] ]", self.search_query),
+                    Style::default()
+                        .bg(search_bg)
+                        .fg(self.theme.foreground)
+                        .add_modifier(Modifier::BOLD),
                 )
             } else {
                 (
-                    " ⌕ Search [/]...".to_string(),
-                    Style::default().bg(search_bg).fg(self.theme.muted),
+                    " [ ⌕ Search [/]... ]".to_string(),
+                    Style::default()
+                        .bg(search_bg)
+                        .fg(self.theme.light_foreground),
                 )
             };
 

@@ -57,6 +57,7 @@ impl HelpModal {
             ("  f              ", "Toggle favorite status"),
             ("  r / D          ", "Rename / Delete playlist (in Playlists)"),
             ("  d              ", "Remove track from playlist"),
+            ("  t              ", "Cycle theme (in Settings)"),
             ("", ""),
             ("MOUSE & SHORTCUTS", ""),
             ("  Click anywhere ", "Activate view, play, seek, volume"),

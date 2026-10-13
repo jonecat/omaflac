@@ -34,6 +34,12 @@ pub struct AppConfig {
     pub shuffle: bool,
     pub visualizer_enabled: bool,
     pub visualizer_fps: u64,
+    #[serde(default = "default_theme")]
+    pub theme: String,
+}
+
+fn default_theme() -> String {
+    "auto".to_string()
 }
 
 impl Default for AppConfig {
@@ -58,6 +64,7 @@ impl Default for AppConfig {
             shuffle: false,
             visualizer_enabled: true,
             visualizer_fps: 30,
+            theme: default_theme(),
         }
     }
 }

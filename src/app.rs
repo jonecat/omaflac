@@ -164,7 +164,7 @@ impl App {
 
         let browser_items = FileBrowserView::list_directory(&initial_dir);
 
-        let theme = OmarchyTheme::load();
+        let theme = OmarchyTheme::load_with_preference(Some(&config.theme));
         let update_receiver = Some(crate::updater::Updater::spawn_check());
 
         let mut app = Self {
@@ -1568,6 +1568,9 @@ impl App {
                 KeyCode::Char('s') => {
                     self.trigger_scan();
                 }
+                KeyCode::Char('t') | KeyCode::Char('T') => {
+                    self.cycle_theme();
+                }
                 _ => {}
             },
             ViewMode::SearchResults => match key.code {
@@ -2188,6 +2191,9 @@ impl App {
                             SettingsAction::RestartApp => {
                                 self.trigger_restart();
                             }
+                            SettingsAction::CycleTheme => {
+                                self.cycle_theme();
+                            }
                         }
                         self.focus = FocusArea::MainView;
                         return;
@@ -2663,5 +2669,12 @@ impl App {
         self.audio.stop();
         self.should_restart = true;
         self.should_quit = true;
+    }
+
+    pub fn cycle_theme(&mut self) {
+        let next = OmarchyTheme::next_preset(&self.config.theme);
+        self.config.theme = next.to_string();
+        self.config.save().ok();
+        self.theme = OmarchyTheme::load_with_preference(Some(&self.config.theme));
     }
 }
