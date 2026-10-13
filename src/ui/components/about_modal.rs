@@ -12,22 +12,24 @@ pub struct AboutModalClickTarget {
 
 pub struct AboutModal;
 
-const LOGO_OMA: [&str; 6] = [
-    " ██████╗ ███╗   ███╗ █████╗ ",
-    "██╔═══██╗████╗ ████║██╔══██╗",
-    "██║   ██║██╔████╔██║███████║",
-    "██║   ██║██║╚██╔╝██║██╔══██║",
-    "╚██████╔╝██║ ╚═╝ ██║██║  ██║",
-    " ╚═════╝ ╚═╝     ╚═╝╚═╝  ╚═╝",
+const LOGO_OMA: [&str; 7] = [
+    " ▄▄▄▄▄▄     ▄███▄     ▄▄▄▄▄▄   ",
+    "███  ███ ███████████ ███  ███  ",
+    "███  ███ ███ ███ ███ ███  ███  ",
+    "███  ███ ███ ███ ███ ████████  ",
+    "███  ███ ███ ███ ███ ███  ███  ",
+    "███  ███ ███ ███ ███ ███  ███  ",
+    " ▀▀▀▀▀▀   ▀▀ ███ ▀▀  ███   ▀▀  ",
 ];
 
-const LOGO_FLAC: [&str; 6] = [
-    "███████╗██╗      █████╗  ██████╗",
-    "██╔════╝██║     ██╔══██╗██╔════╝",
-    "█████╗  ██║     ███████║██║     ",
-    "██╔══╝  ██║     ██╔══██║██║     ",
-    "██║     ███████╗██║  ██║╚██████╗",
-    "╚═╝     ╚══════╝╚═╝  ╚═╝ ╚═════╝",
+const LOGO_FLAC: [&str; 7] = [
+    " ▄▄▄▄▄▄▄  ▄        ▄▄▄▄▄▄   ▄▄▄▄▄▄ ",
+    "████████ ███      ███  ███ ███  ███",
+    "███      ███      ███  ███ ███     ",
+    "███████  ███      ████████ ███     ",
+    "███      ███      ███  ███ ███     ",
+    "███      ████████ ███  ███ ███  ███",
+    "███       ▀▀▀▀▀▀▀ ███   ▀▀  ▀▀▀▀▀▀ ",
 ];
 
 impl AboutModal {
@@ -36,7 +38,7 @@ impl AboutModal {
         buf: &mut Buffer,
         theme: &OmarchyTheme,
     ) -> AboutModalClickTarget {
-        let width = 72u16.min(area.width.saturating_sub(4));
+        let width = 74u16.min(area.width.saturating_sub(4));
         let height = 23u16.min(area.height.saturating_sub(2));
 
         let x = area.left() + (area.width.saturating_sub(width)) / 2;
@@ -75,9 +77,9 @@ impl AboutModal {
 
         let mut cur_y = inner.top() + 1;
 
-        // 1. Stylized two-tone ASCII art "OmaFLAC"
-        let logo_w = 60u16;
-        if inner.width >= logo_w && cur_y + 6 < inner.bottom() {
+        // 1. Stylized two-tone ASCII art "OmaFLAC" in Omarchy brand font
+        let logo_w = 66u16;
+        if inner.width >= logo_w && cur_y + 7 < inner.bottom() {
             let logo_x = inner.left() + (inner.width.saturating_sub(logo_w)) / 2;
             let oma_style = Style::default()
                 .fg(theme.accent)
@@ -88,14 +90,14 @@ impl AboutModal {
                 .bg(theme.background)
                 .add_modifier(Modifier::BOLD);
 
-            for i in 0..6 {
+            for i in 0..7 {
                 let oma_part = LOGO_OMA[i];
                 let flac_part = LOGO_FLAC[i];
                 let oma_chars = oma_part.chars().count() as u16;
                 buf.set_string(logo_x, cur_y + i as u16, oma_part, oma_style);
                 buf.set_string(logo_x + oma_chars, cur_y + i as u16, flac_part, flac_style);
             }
-            cur_y += 7;
+            cur_y += 8;
         } else {
             let fallback = "♬  OmaFLAC  ♬";
             let fx = inner.left() + (inner.width.saturating_sub(fallback.chars().count() as u16)) / 2;
