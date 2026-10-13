@@ -115,6 +115,8 @@ pub struct App {
     pub is_scanning: bool,
     pub scan_status: String,
     pub scan_found_count: usize,
+    pub scan_added_count: usize,
+    pub scan_removed_count: usize,
     pub initial_loading: bool,
     pub scan_receiver: Option<crossbeam_channel::Receiver<ScanUpdate>>,
     pub update_status: crate::updater::UpdateStatus,
@@ -151,7 +153,7 @@ impl App {
         let audio = AudioEngine::new()?;
         let artwork_cache = ArtworkCache::new();
 
-        // If library is empty but config has folders, trigger initial scan asynchronously
+        // Only show blocking splash loader if library cache is completely empty on first launch
         let needs_initial_scan = library.tracks.is_empty() && !config.library_folders.is_empty();
 
         let initial_dir = config
@@ -223,6 +225,8 @@ impl App {
             is_scanning: false,
             scan_status: String::new(),
             scan_found_count: 0,
+            scan_added_count: 0,
+            scan_removed_count: 0,
             initial_loading: needs_initial_scan,
             scan_receiver: None,
             update_status: crate::updater::UpdateStatus::Checking,
@@ -240,13 +244,14 @@ impl App {
             last_settings_targets: Vec::new(),
             last_dialog_targets: Vec::new(),
             last_folder_dialog_targets: Vec::new(),
-            last_about_target: None,
+            last_about_target: Option::default(),
             last_search_targets: Vec::new(),
         };
 
         app.audio.set_volume(app.config.volume);
 
-        if needs_initial_scan {
+        // Automatically run a non-destructive background library sync on startup
+        if !app.config.library_folders.is_empty() {
             app.trigger_scan();
         }
 
@@ -265,24 +270,108 @@ impl App {
         }
 
         // Check for library scanner events
+        let mut pending_updates = Vec::new();
         if let Some(rx) = &self.scan_receiver {
             while let Ok(update) = rx.try_recv() {
-                match update {
-                    ScanUpdate::Progress { current_file, found_count } => {
-                        self.scan_found_count = found_count;
-                        self.scan_status = format!("Scanning: {}", current_file);
+                pending_updates.push(update);
+            }
+        }
+
+        let mut library_dirty = false;
+        for update in pending_updates {
+            match update {
+                ScanUpdate::Progress {
+                    current_file,
+                    found_count,
+                } => {
+                    self.scan_found_count = found_count;
+                    self.scan_status = format!(
+                        "Syncing ({} checked, +{} / -{}): {}",
+                        found_count, self.scan_added_count, self.scan_removed_count, current_file
+                    );
+                }
+                ScanUpdate::UpsertBatch { tracks } => {
+                    let mut added = 0;
+                    let mut updated = 0;
+                    self.with_preserved_selections(|lib| {
+                        let (a, u) = lib.upsert_tracks(tracks);
+                        added = a;
+                        updated = u;
+                    });
+                    self.scan_added_count += added;
+                    if added > 0 || updated > 0 {
+                        library_dirty = true;
                     }
-                    ScanUpdate::Completed { tracks } => {
-                        self.scan_found_count = tracks.len();
-                        self.library.tracks = tracks;
-                        self.library.scanned_at = Some(std::time::SystemTime::now());
-                        self.library.save().ok();
-                        self.is_scanning = false;
+                    if !self.library.tracks.is_empty() {
                         self.initial_loading = false;
-                        self.scan_status = format!("Scan complete: {} audio tracks indexed", self.library.tracks.len());
+                    }
+                }
+                ScanUpdate::BackfillStat { stats } => {
+                    if self.library.backfill_stats(&stats) {
+                        library_dirty = true;
+                    }
+                }
+                ScanUpdate::RemoveTracks { removed_paths } => {
+                    let mut removed = 0;
+                    self.with_preserved_selections(|lib| {
+                        removed = lib.remove_tracks_by_path(&removed_paths);
+                    });
+                    self.scan_removed_count += removed;
+                    if removed > 0 {
+                        library_dirty = true;
+                    }
+                }
+                ScanUpdate::Completed { tracks } => {
+                    self.scan_found_count = tracks.len();
+                    self.with_preserved_selections(|lib| {
+                        lib.tracks = tracks;
+                    });
+                    self.library.scanned_at = Some(std::time::SystemTime::now());
+                    self.library.save().ok();
+                    self.is_scanning = false;
+                    self.initial_loading = false;
+                    self.scan_status = format!(
+                        "✓ Scan complete: {} audio tracks indexed",
+                        self.library.tracks.len()
+                    );
+                }
+                ScanUpdate::SyncCompleted {
+                    checked_count,
+                    added_count,
+                    updated_count,
+                    removed_count,
+                    offline_folders,
+                } => {
+                    self.scan_found_count = checked_count;
+                    self.library.scanned_at = Some(std::time::SystemTime::now());
+                    self.library.save().ok();
+                    self.is_scanning = false;
+                    self.initial_loading = false;
+                    if offline_folders > 0 && checked_count == 0 {
+                        self.scan_status = format!(
+                            "⚠ Remote library folder offline — keeping {} cached tracks",
+                            self.library.tracks.len()
+                        );
+                    } else if added_count == 0 && updated_count == 0 && removed_count == 0 {
+                        self.scan_status = format!(
+                            "✓ Library up to date ({} tracks verified)",
+                            self.library.tracks.len()
+                        );
+                    } else {
+                        self.scan_status = format!(
+                            "✓ Sync complete: {} tracks (+{} added, {} updated, -{} removed)",
+                            self.library.tracks.len(),
+                            added_count,
+                            updated_count,
+                            removed_count
+                        );
                     }
                 }
             }
+        }
+
+        if library_dirty && self.is_scanning {
+            self.library.save().ok();
         }
 
         // Check for audio events
@@ -912,7 +1001,15 @@ impl App {
                 return;
             }
             KeyCode::Char('s') => {
-                self.audio.stop();
+                if self.view_mode == ViewMode::Settings {
+                    self.trigger_scan();
+                } else {
+                    self.audio.stop();
+                }
+                return;
+            }
+            KeyCode::Char('S') if self.view_mode == ViewMode::Settings => {
+                self.trigger_full_rescan();
                 return;
             }
             KeyCode::Char('n') => {
@@ -1791,6 +1888,11 @@ impl App {
                 }
                 return;
             }
+            if hdr.scan_rect.width > 0 && is_inside(hdr.scan_rect, x, y) {
+                self.set_view(ViewMode::Settings);
+                self.focus = FocusArea::MainView;
+                return;
+            }
             if is_inside(hdr.search_rect, x, y) {
                 if self.view_mode != ViewMode::SearchResults {
                     self.previous_view_mode = self.view_mode;
@@ -2077,6 +2179,9 @@ impl App {
                             SettingsAction::ScanLibrary => {
                                 self.trigger_scan();
                             }
+                            SettingsAction::FullRescanLibrary => {
+                                self.trigger_full_rescan();
+                            }
                             SettingsAction::CheckUpdate => {
                                 self.trigger_update_check();
                             }
@@ -2358,18 +2463,175 @@ impl App {
         }
     }
 
+    /// Mutates `self.library` while re-anchoring the user's selected Artist, Album, and Song
+    /// across views so live background additions/removals never cause selection jumping.
+    fn with_preserved_selections<F: FnOnce(&mut Library)>(&mut self, mutate: F) {
+        let prev_artists = self.library.artists();
+        let cur_artist = prev_artists.get(self.artists_selected_idx).cloned();
+        let cur_artist_album = cur_artist.as_ref().and_then(|art| {
+            self.library
+                .albums_by_artist(art)
+                .get(self.artists_album_idx)
+                .cloned()
+        });
+        let cur_artist_song_id = match (&cur_artist, &cur_artist_album) {
+            (Some(art), Some(alb)) => self
+                .library
+                .tracks_by_artist_and_album(art, alb)
+                .get(self.artists_song_idx)
+                .map(|t| t.id.clone()),
+            _ => None,
+        };
+
+        let prev_albums = self.library.all_albums();
+        let cur_album_key = prev_albums
+            .get(self.albums_selected_idx)
+            .map(|a| (a.artist.clone(), a.album.clone()));
+        let cur_album_song_id = cur_album_key.as_ref().and_then(|(art, alb)| {
+            self.library
+                .tracks_by_artist_and_album(art, alb)
+                .get(self.albums_song_idx)
+                .map(|t| t.id.clone())
+        });
+
+        let cur_song_id = self
+            .library
+            .search(&self.search_query)
+            .get(self.songs_selected_idx)
+            .map(|t| t.id.clone());
+
+        mutate(&mut self.library);
+
+        // 1. Re-anchor Artists view
+        let new_artists = self.library.artists();
+        if new_artists.is_empty() {
+            self.artists_selected_idx = 0;
+            self.artists_album_idx = 0;
+            self.artists_song_idx = 0;
+        } else {
+            if let Some(art) = &cur_artist {
+                if let Some(pos) = new_artists.iter().position(|a| a == art) {
+                    self.artists_selected_idx = pos;
+                } else {
+                    self.artists_selected_idx = self.artists_selected_idx.min(new_artists.len() - 1);
+                }
+            } else {
+                self.artists_selected_idx = self.artists_selected_idx.min(new_artists.len() - 1);
+            }
+
+            if let Some(sel_art) = new_artists.get(self.artists_selected_idx) {
+                let new_albums = self.library.albums_by_artist(sel_art);
+                if new_albums.is_empty() {
+                    self.artists_album_idx = 0;
+                    self.artists_song_idx = 0;
+                } else {
+                    if let Some(alb) = &cur_artist_album {
+                        if let Some(pos) = new_albums.iter().position(|a| a == alb) {
+                            self.artists_album_idx = pos;
+                        } else {
+                            self.artists_album_idx = self.artists_album_idx.min(new_albums.len() - 1);
+                        }
+                    } else {
+                        self.artists_album_idx = self.artists_album_idx.min(new_albums.len() - 1);
+                    }
+
+                    if let Some(sel_alb) = new_albums.get(self.artists_album_idx) {
+                        let new_songs = self.library.tracks_by_artist_and_album(sel_art, sel_alb);
+                        if new_songs.is_empty() {
+                            self.artists_song_idx = 0;
+                        } else if let Some(song_id) = &cur_artist_song_id {
+                            if let Some(pos) = new_songs.iter().position(|t| &t.id == song_id) {
+                                self.artists_song_idx = pos;
+                            } else {
+                                self.artists_song_idx = self.artists_song_idx.min(new_songs.len() - 1);
+                            }
+                        } else {
+                            self.artists_song_idx = self.artists_song_idx.min(new_songs.len() - 1);
+                        }
+                    }
+                }
+            }
+        }
+
+        // 2. Re-anchor Albums view
+        let new_albums = self.library.all_albums();
+        if new_albums.is_empty() {
+            self.albums_selected_idx = 0;
+            self.albums_song_idx = 0;
+        } else {
+            if let Some((art, alb)) = &cur_album_key {
+                if let Some(pos) = new_albums
+                    .iter()
+                    .position(|a| &a.artist == art && &a.album == alb)
+                {
+                    self.albums_selected_idx = pos;
+                } else {
+                    self.albums_selected_idx = self.albums_selected_idx.min(new_albums.len() - 1);
+                }
+            } else {
+                self.albums_selected_idx = self.albums_selected_idx.min(new_albums.len() - 1);
+            }
+
+            if let Some(sel_alb) = new_albums.get(self.albums_selected_idx) {
+                let new_songs = self
+                    .library
+                    .tracks_by_artist_and_album(&sel_alb.artist, &sel_alb.album);
+                if new_songs.is_empty() {
+                    self.albums_song_idx = 0;
+                } else if let Some(song_id) = &cur_album_song_id {
+                    if let Some(pos) = new_songs.iter().position(|t| &t.id == song_id) {
+                        self.albums_song_idx = pos;
+                    } else {
+                        self.albums_song_idx = self.albums_song_idx.min(new_songs.len() - 1);
+                    }
+                } else {
+                    self.albums_song_idx = self.albums_song_idx.min(new_songs.len() - 1);
+                }
+            }
+        }
+
+        // 3. Re-anchor Songs view
+        let new_songs = self.library.search(&self.search_query);
+        if new_songs.is_empty() {
+            self.songs_selected_idx = 0;
+        } else if let Some(song_id) = &cur_song_id {
+            if let Some(pos) = new_songs.iter().position(|t| &t.id == song_id) {
+                self.songs_selected_idx = pos;
+            } else {
+                self.songs_selected_idx = self.songs_selected_idx.min(new_songs.len() - 1);
+            }
+        } else {
+            self.songs_selected_idx = self.songs_selected_idx.min(new_songs.len() - 1);
+        }
+    }
+
     pub fn trigger_scan(&mut self) {
+        self.start_library_sync(false);
+    }
+
+    pub fn trigger_full_rescan(&mut self) {
+        self.start_library_sync(true);
+    }
+
+    fn start_library_sync(&mut self, force_full_rescan: bool) {
         self.is_scanning = true;
         self.scan_found_count = 0;
-        self.scan_status = "Scanning library folders...".to_string();
+        self.scan_added_count = 0;
+        self.scan_removed_count = 0;
+        self.scan_status = if force_full_rescan {
+            "Performing full metadata rescan...".to_string()
+        } else {
+            "Syncing library folders in background...".to_string()
+        };
         let folders = self.config.library_folders.clone();
+        let existing_tracks = self.library.tracks.clone();
         let (tx, rx) = crossbeam_channel::unbounded();
         self.scan_receiver = Some(rx);
 
         std::thread::Builder::new()
             .name("library-scanner".into())
             .spawn(move || {
-                Scanner::scan_directories_with_sender(&folders, tx);
+                Scanner::sync_directories_with_sender(&folders, existing_tracks, force_full_rescan, tx);
             })
             .ok();
     }

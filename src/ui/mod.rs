@@ -86,11 +86,27 @@ pub fn render_app(frame: &mut Frame, app: &mut App) {
         _ => None,
     };
 
+    let scan_badge_str = if app.is_scanning {
+        if app.scan_added_count > 0 || app.scan_removed_count > 0 {
+            Some(format!(
+                "⟳ Syncing (+{} / -{})",
+                app.scan_added_count, app.scan_removed_count
+            ))
+        } else if app.scan_found_count > 0 {
+            Some(format!("⟳ Syncing ({})", app.scan_found_count))
+        } else {
+            Some("⟳ Syncing...".to_string())
+        }
+    } else {
+        None
+    };
+
     let header_comp = HeaderComponent {
         view_title,
         total_tracks: app.library.tracks.len(),
         search_query: &app.search_query,
         is_searching: app.is_searching,
+        scan_badge: scan_badge_str.as_deref(),
         update_badge: update_badge_str.as_deref(),
         theme: &app.theme,
     };

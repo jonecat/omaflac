@@ -15,8 +15,29 @@ pub enum ScanUpdate {
         current_file: String,
         found_count: usize,
     },
+    /// Incremental batch of newly discovered or updated tracks
+    UpsertBatch {
+        tracks: Vec<Track>,
+    },
+    /// Backfills file_size and modified_secs on existing cached tracks without re-reading the file
+    BackfillStat {
+        stats: Vec<(PathBuf, Option<u64>, Option<u64>)>,
+    },
+    /// Tracks whose paths were confirmed deleted from an online library folder
+    RemoveTracks {
+        removed_paths: Vec<PathBuf>,
+    },
+    /// Full replacement completion (used by `scan_directories`)
     Completed {
         tracks: Vec<Track>,
+    },
+    /// Incremental sync completion summary
+    SyncCompleted {
+        checked_count: usize,
+        added_count: usize,
+        updated_count: usize,
+        removed_count: usize,
+        offline_folders: usize,
     },
 }
 
@@ -31,6 +52,23 @@ impl Scanner {
                 SUPPORTED_EXTENSIONS.contains(&lower.as_str())
             })
             .unwrap_or(false)
+    }
+
+    pub fn extract_stat_from_meta(meta: &std::fs::Metadata) -> (Option<u64>, Option<u64>) {
+        let size = Some(meta.len());
+        let mtime = meta
+            .modified()
+            .ok()
+            .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+            .map(|d| d.as_secs());
+        (size, mtime)
+    }
+
+    pub fn extract_file_stat(path: &Path) -> (Option<u64>, Option<u64>) {
+        std::fs::metadata(path)
+            .ok()
+            .map(|m| Self::extract_stat_from_meta(&m))
+            .unwrap_or((None, None))
     }
 
     pub fn scan_directories<P: AsRef<Path>>(directories: &[P]) -> Vec<Track> {
@@ -91,6 +129,204 @@ impl Scanner {
         let _ = sender.send(ScanUpdate::Completed { tracks });
     }
 
+    /// Incremental background library sync.
+    /// - Preserves existing cached tracks immediately.
+    /// - Uses `stat` (`file_size` + `modified_secs`) to skip opening unchanged files over the network.
+    /// - Streams newly discovered or modified tracks in small batches via `ScanUpdate::UpsertBatch`.
+    /// - Protects against unmounted/offline network shares by refusing to prune a folder if it is
+    ///   missing or yields 0 audio files when it previously had tracks.
+    pub fn sync_directories_with_sender(
+        directories: &[PathBuf],
+        existing_tracks: Vec<Track>,
+        force_full_rescan: bool,
+        sender: crossbeam_channel::Sender<ScanUpdate>,
+    ) {
+        use std::collections::{HashMap, HashSet};
+        use std::time::{Duration, Instant};
+
+        let mut removed_count = 0usize;
+
+        // 1. Prune tracks belonging to folders that were explicitly removed from config.library_folders
+        let mut orphaned_paths = Vec::new();
+        let mut active_existing = Vec::with_capacity(existing_tracks.len());
+        for track in existing_tracks {
+            if directories.iter().any(|dir| track.path.starts_with(dir)) {
+                active_existing.push(track);
+            } else {
+                orphaned_paths.push(track.path);
+            }
+        }
+        if !orphaned_paths.is_empty() {
+            removed_count += orphaned_paths.len();
+            let _ = sender.send(ScanUpdate::RemoveTracks {
+                removed_paths: orphaned_paths,
+            });
+        }
+
+        let existing_map: HashMap<PathBuf, Track> = active_existing
+            .into_iter()
+            .map(|t| (t.path.clone(), t))
+            .collect();
+
+        let mut checked_count = 0usize;
+        let mut added_count = 0usize;
+        let mut updated_count = 0usize;
+        let mut offline_folders = 0usize;
+
+        let mut upsert_batch: Vec<Track> = Vec::new();
+        let mut backfill_stats: Vec<(PathBuf, Option<u64>, Option<u64>)> = Vec::new();
+        let mut last_flush = Instant::now();
+
+        for dir in directories {
+            let existing_in_dir: Vec<PathBuf> = existing_map
+                .keys()
+                .filter(|p| p.starts_with(dir))
+                .cloned()
+                .collect();
+
+            if !dir.exists() {
+                if !existing_in_dir.is_empty() {
+                    offline_folders += 1;
+                }
+                continue;
+            }
+
+            let mut seen_in_dir: HashSet<PathBuf> = HashSet::new();
+
+            for entry in WalkDir::new(dir)
+                .follow_links(true)
+                .into_iter()
+                .filter_map(|e| e.ok())
+            {
+                let path = entry.path();
+                if !path.is_file() || !Self::is_audio_file(path) {
+                    continue;
+                }
+
+                let path_buf = path.to_path_buf();
+                seen_in_dir.insert(path_buf.clone());
+                checked_count += 1;
+
+                let (cur_size, cur_mtime) = entry
+                    .metadata()
+                    .ok()
+                    .map(|m| Self::extract_stat_from_meta(&m))
+                    .unwrap_or_else(|| Self::extract_file_stat(path));
+
+                let file_name = path
+                    .file_name()
+                    .map(|s| s.to_string_lossy().to_string())
+                    .unwrap_or_default();
+
+                let mut needs_read = true;
+                let mut is_existing = false;
+
+                if let Some(existing) = existing_map.get(path) {
+                    is_existing = true;
+                    if !force_full_rescan && existing.release_date.is_some() {
+                        if existing.file_size.is_some()
+                            && existing.modified_secs.is_some()
+                            && existing.file_size == cur_size
+                            && existing.modified_secs == cur_mtime
+                        {
+                            // Unchanged file: skip opening over the network
+                            needs_read = false;
+                        } else if existing.file_size.is_none() || existing.modified_secs.is_none() {
+                            // First sync after upgrade: backfill stat metadata without opening the file
+                            needs_read = false;
+                            if cur_size.is_some() || cur_mtime.is_some() {
+                                backfill_stats.push((path_buf.clone(), cur_size, cur_mtime));
+                            }
+                        }
+                    }
+                }
+
+                if needs_read {
+                    if let Some(mut track) = Self::read_track(path) {
+                        if cur_size.is_some() {
+                            track.file_size = cur_size;
+                        }
+                        if cur_mtime.is_some() {
+                            track.modified_secs = cur_mtime;
+                        }
+                        if is_existing {
+                            if existing_map.get(path) != Some(&track) {
+                                updated_count += 1;
+                                upsert_batch.push(track);
+                            } else if cur_size.is_some() || cur_mtime.is_some() {
+                                backfill_stats.push((path_buf, cur_size, cur_mtime));
+                            }
+                        } else {
+                            added_count += 1;
+                            upsert_batch.push(track);
+                        }
+                    }
+                }
+
+                if upsert_batch.len() >= 8
+                    || (!upsert_batch.is_empty()
+                        && last_flush.elapsed() >= Duration::from_millis(250))
+                {
+                    let _ = sender.send(ScanUpdate::UpsertBatch {
+                        tracks: std::mem::take(&mut upsert_batch),
+                    });
+                    last_flush = Instant::now();
+                }
+
+                if backfill_stats.len() >= 50 {
+                    let _ = sender.send(ScanUpdate::BackfillStat {
+                        stats: std::mem::take(&mut backfill_stats),
+                    });
+                }
+
+                if checked_count == 1 || checked_count % 10 == 0 {
+                    let _ = sender.send(ScanUpdate::Progress {
+                        current_file: file_name,
+                        found_count: checked_count,
+                    });
+                }
+            }
+
+            if !upsert_batch.is_empty() {
+                let _ = sender.send(ScanUpdate::UpsertBatch {
+                    tracks: std::mem::take(&mut upsert_batch),
+                });
+                last_flush = Instant::now();
+            }
+
+            if !backfill_stats.is_empty() {
+                let _ = sender.send(ScanUpdate::BackfillStat {
+                    stats: std::mem::take(&mut backfill_stats),
+                });
+            }
+
+            // Offline / unmounted remote folder protection:
+            // If `dir` previously had tracks but yielded 0 audio files now, treat it as unmounted/offline.
+            if seen_in_dir.is_empty() && !existing_in_dir.is_empty() {
+                offline_folders += 1;
+            } else {
+                let removed_in_dir: Vec<PathBuf> = existing_in_dir
+                    .into_iter()
+                    .filter(|p| !seen_in_dir.contains(p))
+                    .collect();
+                if !removed_in_dir.is_empty() {
+                    removed_count += removed_in_dir.len();
+                    let _ = sender.send(ScanUpdate::RemoveTracks {
+                        removed_paths: removed_in_dir,
+                    });
+                }
+            }
+        }
+
+        let _ = sender.send(ScanUpdate::SyncCompleted {
+            checked_count,
+            added_count,
+            updated_count,
+            removed_count,
+            offline_folders,
+        });
+    }
+
     pub fn has_folder_cover(dir: &Path) -> bool {
         let common_names = [
             "cover.jpg",
@@ -144,6 +380,7 @@ impl Scanner {
         let id = Track::generate_id(path);
         let parent_dir = path.parent();
         let folder_has_cover = parent_dir.map(Self::has_folder_cover).unwrap_or(false);
+        let (file_size, modified_secs) = Self::extract_file_stat(path);
 
         // Try reading with Lofty
         if let Ok(tagged_file) = Probe::open(path).and_then(|p| p.read()) {
@@ -220,6 +457,8 @@ impl Scanner {
                 bit_depth,
                 bitrate_kbps,
                 has_cover_art,
+                file_size,
+                modified_secs,
             });
         }
 
@@ -255,6 +494,8 @@ impl Scanner {
             bit_depth: None,
             bitrate_kbps: None,
             has_cover_art: folder_has_cover,
+            file_size,
+            modified_secs,
         })
     }
 

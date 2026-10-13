@@ -31,7 +31,10 @@
   - **Songs (`3`)**: Filterable library table with track metadata, duration, format badges, and favorite stars (`★`).
   - **Visualizer (`4`)**: Large album cover art, lossless format/sample-rate/bit-depth readout, live FFT spectrum analyzer, and compact track waveform.
   - **Playlists (`5`)**: Built-in **★ Favorites**, **◷ Recently Played**, and custom user playlists (`a` to add tracks, `n` to create playlists, `d` to remove tracks).
-  - **Settings (`6`)**: Manage library folders via an interactive **Add Library Folder** modal, trigger background library rescans, and check/install **Application Updates** directly inside the TUI.
+  - **Settings (`6`)**: Manage library folders via an interactive **Add Library Folder** modal, trigger incremental library syncs (`s`) or full metadata rescans (`S`), and check/install **Application Updates** directly inside the TUI.
+- **Incremental Background Library Sync (Remote / NAS Friendly)**:
+  - Loads your cached library instantaneously on startup and automatically runs a non-destructive incremental sync in the background (`⟳ Syncing...` in the top bar).
+  - Uses file size + modification timestamp (`stat`) caching to skip opening unchanged files over network mounts, streams additions/removals live without cursor jumping, and preserves cached tracks if a remote server/NAS is offline.
 - **Built-In Version Checker & Self-Updater**:
   - Non-blocking background check against GitHub on startup; displays a clickable `[↑ Update v...]` badge in the top bar when a newer release or commit is available.
   - Update in-app from **Settings (`6`)** while music continues playing, or from the terminal via `omaflac update`.

@@ -9,6 +9,7 @@ pub struct HeaderComponent<'a> {
     pub total_tracks: usize,
     pub search_query: &'a str,
     pub is_searching: bool,
+    pub scan_badge: Option<&'a str>,
     pub update_badge: Option<&'a str>,
     pub theme: &'a OmarchyTheme,
 }
@@ -17,6 +18,7 @@ pub struct HeaderClickTarget {
     pub logo_rect: Rect,
     pub search_rect: Rect,
     pub help_rect: Rect,
+    pub scan_rect: Rect,
     pub update_rect: Rect,
 }
 
@@ -46,6 +48,7 @@ impl<'a> HeaderComponent<'a> {
                 logo_rect: Rect::default(),
                 search_rect: Rect::default(),
                 help_rect: Rect::default(),
+                scan_rect: Rect::default(),
                 update_rect: Rect::default(),
             };
         }
@@ -120,10 +123,11 @@ impl<'a> HeaderComponent<'a> {
         }
 
         // Optional Update Notification Badge to the left of the search box
+        let mut right_anchor = search_x;
         let mut update_rect = Rect::default();
         if let Some(badge_text) = self.update_badge {
             let badge_w = badge_text.chars().count() as u16;
-            let badge_x = search_x.saturating_sub(badge_w + 2);
+            let badge_x = right_anchor.saturating_sub(badge_w + 2);
             if badge_x > x + breadcrumb_w + 2 {
                 update_rect = Rect::new(badge_x, y, badge_w, 1);
                 buf.set_string(
@@ -134,6 +138,25 @@ impl<'a> HeaderComponent<'a> {
                         .fg(self.theme.accent)
                         .add_modifier(Modifier::BOLD),
                 );
+                right_anchor = badge_x;
+            }
+        }
+
+        // Optional Background Library Scan/Sync Badge to the left of the search/update area
+        let mut scan_rect = Rect::default();
+        if let Some(scan_text) = self.scan_badge {
+            let scan_w = scan_text.chars().count() as u16;
+            let scan_x = right_anchor.saturating_sub(scan_w + 2);
+            if scan_x > x + breadcrumb_w + 2 {
+                scan_rect = Rect::new(scan_x, y, scan_w, 1);
+                buf.set_string(
+                    scan_x,
+                    y,
+                    scan_text,
+                    Style::default()
+                        .fg(self.theme.yellow)
+                        .add_modifier(Modifier::BOLD),
+                );
             }
         }
 
@@ -141,6 +164,7 @@ impl<'a> HeaderComponent<'a> {
             logo_rect,
             search_rect,
             help_rect,
+            scan_rect,
             update_rect,
         }
     }

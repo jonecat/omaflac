@@ -16,6 +16,7 @@ pub enum SettingsAction {
     AddFolder,
     RemoveFolder(usize),
     ScanLibrary,
+    FullRescanLibrary,
     CheckUpdate,
     RunUpdate,
     RestartApp,
@@ -172,29 +173,55 @@ impl<'a> SettingsView<'a> {
             y += 2;
         }
 
-        // Scan button & status
-        let scan_btn_label = if self.is_scanning {
-            " ⟳ [Scanning Library...]"
+        // Sync & Full Rescan buttons + status
+        let sync_btn_label = if self.is_scanning {
+            " ⟳ [Syncing Library...]"
         } else {
-            " ⟳ [Scan Library Now]"
+            " ⟳ [Sync Library (s)]"
         };
-        let scan_rect = Rect::new(inner.left(), y, scan_btn_label.chars().count() as u16, 1);
-        buf.set_string(inner.left(), y, scan_btn_label, self.theme.accent_text());
+        let sync_w = sync_btn_label.chars().count() as u16;
+        let sync_rect = Rect::new(inner.left(), y, sync_w, 1);
+        buf.set_string(inner.left(), y, sync_btn_label, self.theme.accent_text());
         targets.push(SettingsClickTarget {
-            rect: scan_rect,
+            rect: sync_rect,
             action: SettingsAction::ScanLibrary,
         });
 
+        let full_btn_x = inner.left() + sync_w + 3;
+        let full_btn_label = "[Full Rescan (S)]";
+        let full_w = full_btn_label.chars().count() as u16;
+        let full_rect = Rect::new(full_btn_x, y, full_w, 1);
+        buf.set_string(
+            full_btn_x,
+            y,
+            full_btn_label,
+            if self.is_scanning {
+                self.theme.muted_text()
+            } else {
+                self.theme.secondary_text()
+            },
+        );
+        targets.push(SettingsClickTarget {
+            rect: full_rect,
+            action: SettingsAction::FullRescanLibrary,
+        });
+
         if !self.scan_status.is_empty() {
+            y += 1;
+            let status_trunc: String = self
+                .scan_status
+                .chars()
+                .take(inner.width.saturating_sub(2) as usize)
+                .collect();
             buf.set_string(
-                inner.left() + scan_btn_label.chars().count() as u16 + 2,
+                inner.left() + 1,
                 y,
-                self.scan_status,
-                self.theme.secondary_text(),
+                &status_trunc,
+                Style::default().fg(self.theme.yellow),
             );
         }
 
-        y += 3;
+        y += 2;
 
         // Section: Application Version & Updates
         if y < inner.bottom().saturating_sub(5) {

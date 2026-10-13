@@ -22,6 +22,10 @@ pub struct Track {
     pub bit_depth: Option<u8>,
     pub bitrate_kbps: Option<u32>,
     pub has_cover_art: bool,
+    #[serde(default)]
+    pub file_size: Option<u64>,
+    #[serde(default)]
+    pub modified_secs: Option<u64>,
 }
 
 impl Track {

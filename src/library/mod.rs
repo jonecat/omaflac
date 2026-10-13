@@ -27,22 +27,7 @@ impl Library {
     pub fn load() -> Self {
         let path = Self::library_path();
         if let Ok(file) = std::fs::File::open(&path) {
-            if let Ok(mut lib) = serde_json::from_reader::<_, Self>(file) {
-                let mut updated = false;
-                for track in &mut lib.tracks {
-                    if track.release_date.is_none() {
-                        if let Some(fresh) = Scanner::read_track(&track.path) {
-                            if fresh.release_date.is_some() {
-                                track.release_date = fresh.release_date;
-                                track.year = fresh.year;
-                                updated = true;
-                            }
-                        }
-                    }
-                }
-                if updated {
-                    lib.save().ok();
-                }
+            if let Ok(lib) = serde_json::from_reader::<_, Self>(file) {
                 return lib;
             }
         }
@@ -54,6 +39,75 @@ impl Library {
         let file = std::fs::File::create(path)?;
         serde_json::to_writer_pretty(file, self)?;
         Ok(())
+    }
+
+    pub fn sort_tracks(&mut self) {
+        self.tracks.sort_by(|a, b| {
+            a.artist
+                .cmp(&b.artist)
+                .then_with(|| a.album.cmp(&b.album))
+                .then_with(|| a.disc_number.cmp(&b.disc_number))
+                .then_with(|| a.track_number.cmp(&b.track_number))
+                .then_with(|| a.title.cmp(&b.title))
+        });
+    }
+
+    /// Merges a batch of new or updated tracks into the library without wiping existing tracks.
+    /// Returns `(added_count, updated_count)`.
+    pub fn upsert_tracks(&mut self, batch: Vec<Track>) -> (usize, usize) {
+        if batch.is_empty() {
+            return (0, 0);
+        }
+        let mut added = 0usize;
+        let mut updated = 0usize;
+        for track in batch {
+            if let Some(existing) = self.tracks.iter_mut().find(|t| t.path == track.path) {
+                if *existing != track {
+                    *existing = track;
+                    updated += 1;
+                }
+            } else {
+                self.tracks.push(track);
+                added += 1;
+            }
+        }
+        if added > 0 || updated > 0 {
+            self.sort_tracks();
+        }
+        (added, updated)
+    }
+
+    /// Removes tracks matching any of `removed_paths`. Returns the number of tracks removed.
+    pub fn remove_tracks_by_path(&mut self, removed_paths: &[PathBuf]) -> usize {
+        if removed_paths.is_empty() {
+            return 0;
+        }
+        let set: std::collections::HashSet<&PathBuf> = removed_paths.iter().collect();
+        let before = self.tracks.len();
+        self.tracks.retain(|t| !set.contains(&t.path));
+        before.saturating_sub(self.tracks.len())
+    }
+
+    /// Updates `file_size` and `modified_secs` in-place on existing tracks.
+    pub fn backfill_stats(&mut self, stats: &[(PathBuf, Option<u64>, Option<u64>)]) -> bool {
+        if stats.is_empty() {
+            return false;
+        }
+        let map: std::collections::HashMap<&PathBuf, (Option<u64>, Option<u64>)> = stats
+            .iter()
+            .map(|(p, sz, mt)| (p, (*sz, *mt)))
+            .collect();
+        let mut changed = false;
+        for track in &mut self.tracks {
+            if let Some(&(sz, mt)) = map.get(&track.path) {
+                if track.file_size != sz || track.modified_secs != mt {
+                    track.file_size = sz;
+                    track.modified_secs = mt;
+                    changed = true;
+                }
+            }
+        }
+        changed
     }
 
     pub fn scan(&mut self, directories: &[PathBuf]) {

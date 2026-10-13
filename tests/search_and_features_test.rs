@@ -23,6 +23,8 @@ fn create_sample_library() -> Library {
         bit_depth: Some(24),
         bitrate_kbps: Some(2800),
         has_cover_art: true,
+        file_size: Some(45_000_000),
+        modified_secs: Some(1_700_000_000),
     };
 
     let t2 = Track {
@@ -43,6 +45,8 @@ fn create_sample_library() -> Library {
         bit_depth: Some(24),
         bitrate_kbps: Some(2850),
         has_cover_art: true,
+        file_size: Some(42_000_000),
+        modified_secs: Some(1_700_000_000),
     };
 
     let t3 = Track {
@@ -63,6 +67,8 @@ fn create_sample_library() -> Library {
         bit_depth: Some(16),
         bitrate_kbps: Some(890),
         has_cover_art: true,
+        file_size: Some(28_000_000),
+        modified_secs: Some(1_700_000_000),
     };
 
     Library {
@@ -164,5 +170,76 @@ fn test_albums_two_pane_view() {
     // Verify favorite star '★' is rendered in the buffer
     let rendered_text: String = buf.content().iter().map(|c| c.symbol()).collect();
     assert!(rendered_text.contains('★'), "Favorited song in AlbumsView should display ★");
+}
+
+#[test]
+fn test_incremental_sync_and_offline_mount_protection() {
+    use omaflac::library::scanner::{ScanUpdate, Scanner};
+
+    let mut lib = create_sample_library();
+    assert_eq!(lib.tracks.len(), 3);
+
+    // 1. Test offline mount protection: "/music" does not exist on disk, so syncing ["/music"]
+    // must NOT delete the 3 cached tracks!
+    let (tx, rx) = crossbeam_channel::unbounded();
+    Scanner::sync_directories_with_sender(
+        &[PathBuf::from("/music")],
+        lib.tracks.clone(),
+        false,
+        tx,
+    );
+
+    let mut offline_detected = 0;
+    while let Ok(update) = rx.recv() {
+        match update {
+            ScanUpdate::RemoveTracks { removed_paths } => {
+                lib.remove_tracks_by_path(&removed_paths);
+            }
+            ScanUpdate::SyncCompleted {
+                offline_folders, ..
+            } => {
+                offline_detected = offline_folders;
+            }
+            _ => {}
+        }
+    }
+    assert_eq!(offline_detected, 1, "Should detect offline /music mount");
+    assert_eq!(
+        lib.tracks.len(),
+        3,
+        "Cached tracks must be preserved when remote mount is offline"
+    );
+
+    // 2. Test incremental upsert of a new track without wiping existing tracks
+    let new_track = Track {
+        id: "4".into(),
+        path: PathBuf::from("/music/daftpunk/one_more_time.flac"),
+        title: "One More Time".into(),
+        artist: "Daft Punk".into(),
+        album: "Discovery".into(),
+        album_artist: Some("Daft Punk".into()),
+        genre: Some("Electronic".into()),
+        year: Some(2001),
+        release_date: Some("2001-03-12".into()),
+        track_number: Some(1),
+        disc_number: Some(1),
+        duration_secs: 320,
+        format: "FLAC".into(),
+        sample_rate: Some(44100),
+        bit_depth: Some(16),
+        bitrate_kbps: Some(950),
+        has_cover_art: true,
+        file_size: Some(35_000_000),
+        modified_secs: Some(1_700_000_000),
+    };
+    let (added, updated) = lib.upsert_tracks(vec![new_track]);
+    assert_eq!(added, 1);
+    assert_eq!(updated, 0);
+    assert_eq!(lib.tracks.len(), 4);
+    assert_eq!(
+        lib.artists()[0],
+        "Daft Punk",
+        "New artist should be sorted alphabetically into existing library"
+    );
 }
 
