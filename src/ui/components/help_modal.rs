@@ -9,7 +9,7 @@ pub struct HelpModal;
 impl HelpModal {
     pub fn render(area: Rect, buf: &mut Buffer, theme: &OmarchyTheme) {
         let width = 76u16.min(area.width.saturating_sub(2));
-        let height = 24u16.min(area.height.saturating_sub(2));
+        let height = 28u16.min(area.height.saturating_sub(2));
 
         let x = area.left() + (area.width.saturating_sub(width)) / 2;
         let y = area.top() + (area.height.saturating_sub(height)) / 2;
@@ -62,6 +62,7 @@ impl HelpModal {
             ("  Click anywhere ", "Activate view, play, seek, volume"),
             ("  Scroll wheel   ", "Scroll lists or adjust volume"),
             ("  ? / Esc        ", "Close help overlay"),
+            ("  q / Ctrl-C     ", "Quit OmaFLAC"),
         ];
 
         let mut cur_y = inner.top() + 1;
