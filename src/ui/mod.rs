@@ -82,10 +82,10 @@ pub fn render_app(frame: &mut Frame, app: &mut App) {
 
     let update_badge_str = match &app.update_status {
         crate::updater::UpdateStatus::UpdateAvailable { latest_version, .. } => {
-            Some(format!("[↑ Update v{}]", latest_version))
+            Some(format!("↑ Update v{}", latest_version))
         }
         crate::updater::UpdateStatus::UpdatedReadyToRestart { .. } => {
-            Some("[↻ Restart to Update]".to_string())
+            Some("↻ Restart to Update".to_string())
         }
         _ => None,
     };
