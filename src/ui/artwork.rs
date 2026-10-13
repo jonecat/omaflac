@@ -1,30 +1,64 @@
 use crate::library::scanner::Scanner;
 use crate::library::track::Track;
+use crate::ui::theme::OmarchyTheme;
 use lofty::file::TaggedFileExt;
 use lofty::probe::Probe;
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
-use ratatui::style::Color;
-use ratatui::widgets::Widget;
-use std::collections::HashMap;
-use std::path::PathBuf;
+use ratatui::style::{Color, Modifier, Style};
+use ratatui::widgets::{StatefulWidget, Widget};
+use ratatui_image::picker::Picker;
+use ratatui_image::protocol::StatefulProtocol;
+use ratatui_image::StatefulImage;
+use std::collections::{HashMap, HashSet};
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
+use std::time::{SystemTime, UNIX_EPOCH};
+
+pub const SPINNER_CHARS: &[char] = &['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum ArtSize {
+    Full,
+    Thumb,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ArtRenderResult {
+    Rendered,
+    Loading,
+    NotFound,
+}
 
 #[derive(Clone)]
 pub struct ArtworkCache {
-    cache: Arc<Mutex<HashMap<(PathBuf, u16, u16), Vec<HalfBlockPixel>>>>,
-}
-
-#[derive(Clone, Copy)]
-pub struct HalfBlockPixel {
-    pub top_color: Color,
-    pub bottom_color: Color,
+    picker: Arc<Mutex<Picker>>,
+    images: Arc<Mutex<HashMap<PathBuf, Option<Arc<image::DynamicImage>>>>>,
+    in_flight: Arc<Mutex<HashSet<PathBuf>>>,
+    protocols: Arc<Mutex<HashMap<(PathBuf, ArtSize), StatefulProtocol>>>,
 }
 
 impl Default for ArtworkCache {
     fn default() -> Self {
+        // Query terminal stdio for graphics capabilities (Ghostty Kitty protocol / Sixel / Halfblocks)
+        let mut options = ratatui_image::picker::cap_parser::QueryStdioOptions::default();
+        options.timeout = std::time::Duration::from_millis(100);
+        let picker = Picker::from_query_stdio_with_options(options).unwrap_or_else(|_| {
+            let mut p = Picker::halfblocks();
+            let is_kitty_compat = std::env::var("GHOSTTY_RESOURCES_DIR").is_ok()
+                || std::env::var("TERM_PROGRAM").map(|v| v.contains("ghostty") || v.contains("kitty")).unwrap_or(false)
+                || std::env::var("TERM").map(|t| t.contains("kitty") || t.contains("ghostty")).unwrap_or(false)
+                || std::env::var("KITTY_WINDOW_ID").is_ok();
+            if is_kitty_compat {
+                p.set_protocol_type(ratatui_image::picker::ProtocolType::Kitty);
+            }
+            p
+        });
         Self {
-            cache: Arc::new(Mutex::new(HashMap::new())),
+            picker: Arc::new(Mutex::new(picker)),
+            images: Arc::new(Mutex::new(HashMap::new())),
+            in_flight: Arc::new(Mutex::new(HashSet::new())),
+            protocols: Arc::new(Mutex::new(HashMap::new())),
         }
     }
 }
@@ -34,35 +68,122 @@ impl ArtworkCache {
         Self::default()
     }
 
-    pub fn get_or_render(
+    pub fn is_loading(&self, path: &Path) -> bool {
+        if let Ok(flight) = self.in_flight.lock() {
+            flight.contains(path)
+        } else {
+            false
+        }
+    }
+
+    pub fn thumb_width_for_height(&self, height_rows: u16) -> u16 {
+        if let Ok(picker) = self.picker.lock() {
+            let fs = picker.font_size();
+            if fs.width > 0 && fs.height > 0 {
+                let target_px = (height_rows as u32) * (fs.height as u32);
+                let cols = (target_px + fs.width as u32 - 1) / (fs.width as u32);
+                return (cols as u16).max(height_rows * 2);
+            }
+        }
+        height_rows * 2 + 1
+    }
+
+    pub fn render_track_artwork(
         &self,
         track: &Track,
-        width: u16,
-        height: u16,
-    ) -> Option<Vec<HalfBlockPixel>> {
-        if width == 0 || height == 0 {
-            return None;
-        }
+        size: ArtSize,
+        area: Rect,
+        buf: &mut Buffer,
+    ) -> ArtRenderResult {
+        let resize_mode = match size {
+            ArtSize::Thumb => ratatui_image::Resize::Scale(Some(ratatui_image::FilterType::CatmullRom)),
+            ArtSize::Full => ratatui_image::Resize::Fit(Some(ratatui_image::FilterType::CatmullRom)),
+        };
 
-        let key = (track.path.clone(), width, height);
-        if let Ok(c) = self.cache.lock() {
-            if let Some(pixels) = c.get(&key) {
-                return Some(pixels.clone());
+        // 1. Check if resize protocol already exists in cache
+        if let Ok(mut protos) = self.protocols.lock() {
+            if let Some(proto) = protos.get_mut(&(track.path.clone(), size)) {
+                let widget = StatefulImage::default().resize(resize_mode);
+                widget.render(area, buf, proto);
+                return ArtRenderResult::Rendered;
             }
         }
 
-        // Try extracting and rendering artwork
-        let image = Self::load_image_for_track(track)?;
-        let pixels = Self::render_to_halfblocks(&image, width as u32, height as u32);
+        // 2. Check if decoded image is already cached in memory
+        let cached_image = {
+            if let Ok(img_map) = self.images.lock() {
+                img_map.get(&track.path).cloned()
+            } else {
+                None
+            }
+        };
 
-        if let Ok(mut c) = self.cache.lock() {
-            c.insert(key, pixels.clone());
+        match cached_image {
+            Some(Some(arc_image)) => {
+                // Decoded image is in memory: create protocol for this size
+                if let Ok(picker) = self.picker.lock() {
+                    let img_for_proto = if size == ArtSize::Thumb {
+                        let w = arc_image.width();
+                        let h = arc_image.height();
+                        let side = w.min(h);
+                        if side > 0 && w != h {
+                            arc_image.crop_imm((w - side) / 2, (h - side) / 2, side, side)
+                        } else {
+                            (*arc_image).clone()
+                        }
+                    } else {
+                        (*arc_image).clone()
+                    };
+                    let mut proto = picker.new_resize_protocol(img_for_proto);
+                    let widget = StatefulImage::default().resize(resize_mode);
+                    widget.render(area, buf, &mut proto);
+                    if let Ok(mut protos) = self.protocols.lock() {
+                        protos.insert((track.path.clone(), size), proto);
+                    }
+                    return ArtRenderResult::Rendered;
+                }
+                ArtRenderResult::NotFound
+            }
+            Some(None) => {
+                // Already checked and track has no artwork
+                ArtRenderResult::NotFound
+            }
+            None => {
+                // Not in image cache: start asynchronous load in background thread
+                let mut should_spawn = false;
+                if let Ok(mut flight) = self.in_flight.lock() {
+                    if !flight.contains(&track.path) {
+                        flight.insert(track.path.clone());
+                        should_spawn = true;
+                    }
+                }
+
+                if should_spawn {
+                    let path = track.path.clone();
+                    let track_clone = track.clone();
+                    let images_clone = Arc::clone(&self.images);
+                    let in_flight_clone = Arc::clone(&self.in_flight);
+
+                    std::thread::Builder::new()
+                        .name("art-loader".into())
+                        .spawn(move || {
+                            let maybe_img = Self::load_image_for_track(&track_clone).map(Arc::new);
+                            if let Ok(mut map) = images_clone.lock() {
+                                map.insert(path.clone(), maybe_img);
+                            }
+                            if let Ok(mut flight) = in_flight_clone.lock() {
+                                flight.remove(&path);
+                            }
+                        })
+                        .ok();
+                }
+
+                ArtRenderResult::Loading
+            }
         }
-
-        Some(pixels)
     }
 
-    fn load_image_for_track(track: &Track) -> Option<image::DynamicImage> {
+    pub fn load_image_for_track(track: &Track) -> Option<image::DynamicImage> {
         // 1. Try embedded tag pictures
         if let Ok(tagged_file) = Probe::open(&track.path).and_then(|p| p.read()) {
             let tag = tagged_file.primary_tag().or_else(|| tagged_file.first_tag());
@@ -75,7 +196,7 @@ impl ArtworkCache {
             }
         }
 
-        // 2. Try parent folder covers
+        // 2. Try parent folder covers (cover.jpg, folder.jpg, album.jpg, etc.)
         if let Some(parent) = track.path.parent() {
             if let Some(cover_path) = Scanner::find_folder_cover(parent) {
                 if let Ok(img) = image::open(&cover_path) {
@@ -86,45 +207,32 @@ impl ArtworkCache {
 
         None
     }
-
-    fn render_to_halfblocks(img: &image::DynamicImage, width: u32, height: u32) -> Vec<HalfBlockPixel> {
-        // height in terminal rows corresponds to (height * 2) pixels vertically
-        let pixel_height = height * 2;
-        let resized = img.resize_exact(width, pixel_height, image::imageops::FilterType::Triangle);
-        let rgb_img = resized.to_rgb8();
-
-        let mut pixels = Vec::with_capacity((width * height) as usize);
-
-        for y in 0..height {
-            let top_y = y * 2;
-            let bottom_y = top_y + 1;
-
-            for x in 0..width {
-                let top_p = rgb_img.get_pixel(x, top_y);
-                let bottom_p = rgb_img.get_pixel(x, bottom_y);
-
-                let top_color = Color::Rgb(top_p[0], top_p[1], top_p[2]);
-                let bottom_color = Color::Rgb(bottom_p[0], bottom_p[1], bottom_p[2]);
-
-                pixels.push(HalfBlockPixel {
-                    top_color,
-                    bottom_color,
-                });
-            }
-        }
-
-        pixels
-    }
 }
 
 pub struct ArtworkWidget<'a> {
     track: Option<&'a Track>,
     cache: &'a ArtworkCache,
+    theme: Option<&'a OmarchyTheme>,
+    size: ArtSize,
 }
 
 impl<'a> ArtworkWidget<'a> {
-    pub fn new(track: Option<&'a Track>, cache: &'a ArtworkCache) -> Self {
-        Self { track, cache }
+    pub fn new(
+        track: Option<&'a Track>,
+        cache: &'a ArtworkCache,
+        theme: Option<&'a OmarchyTheme>,
+    ) -> Self {
+        Self {
+            track,
+            cache,
+            theme,
+            size: ArtSize::Full,
+        }
+    }
+
+    pub fn with_size(mut self, size: ArtSize) -> Self {
+        self.size = size;
+        self
     }
 }
 
@@ -134,28 +242,77 @@ impl<'a> Widget for ArtworkWidget<'a> {
             return;
         }
 
+        let bg_color = self
+            .theme
+            .map(|t| t.dark_background)
+            .unwrap_or(Color::Rgb(20, 24, 45));
+
+        let accent_color = self
+            .theme
+            .map(|t| t.accent)
+            .unwrap_or(Color::Rgb(158, 206, 106));
+
+        let cyan_color = self
+            .theme
+            .map(|t| t.cyan)
+            .unwrap_or(Color::Rgb(125, 207, 255));
+
+        let current_spinner = {
+            let ms = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_millis();
+            let idx = (ms / 90) as usize % SPINNER_CHARS.len();
+            SPINNER_CHARS[idx]
+        };
+
         if let Some(track) = self.track {
-            if let Some(pixels) = self.cache.get_or_render(track, area.width, area.height) {
-                let mut idx = 0;
-                for y in 0..area.height {
-                    for x in 0..area.width {
-                        if idx < pixels.len() {
-                            let p = pixels[idx];
+            match self.cache.render_track_artwork(track, self.size, area, buf) {
+                ArtRenderResult::Rendered => return,
+                ArtRenderResult::Loading => {
+                    // Draw loading state box with spinner
+                    for y in 0..area.height {
+                        for x in 0..area.width {
                             let cell = &mut buf[(area.left() + x, area.top() + y)];
-                            cell.set_symbol("▀");
-                            cell.set_fg(p.top_color);
-                            cell.set_bg(p.bottom_color);
-                            idx += 1;
+                            cell.set_symbol(" ");
+                            cell.set_bg(bg_color);
                         }
                     }
+
+                    let center_y = area.top() + area.height / 2;
+                    let center_x = area.left() + area.width / 2;
+
+                    if self.size == ArtSize::Thumb {
+                        if center_x < area.right() && center_y < area.bottom() {
+                            buf.set_string(
+                                center_x.saturating_sub(1),
+                                center_y,
+                                format!("{} ♪", current_spinner),
+                                Style::default().fg(cyan_color).add_modifier(Modifier::BOLD),
+                            );
+                        }
+                    } else {
+                        // Full artwork loading box
+                        let spin_str = format!("{}  Loading Album Artwork...", current_spinner);
+                        let msg_x = center_x.saturating_sub(spin_str.chars().count() as u16 / 2);
+                        if msg_x < area.right() && center_y < area.bottom() {
+                            buf.set_string(
+                                msg_x,
+                                center_y,
+                                &spin_str,
+                                Style::default().fg(cyan_color).add_modifier(Modifier::BOLD),
+                            );
+                        }
+                    }
+                    return;
                 }
-                return;
+                ArtRenderResult::NotFound => {
+                    // Fallthrough to placeholder below
+                }
             }
         }
 
-        // Placeholder artwork if no cover art is found
-        let bg_color = Color::Rgb(36, 40, 59);
-
+        // Placeholder artwork if no cover art is found or no track selected
         for y in 0..area.height {
             for x in 0..area.width {
                 let cell = &mut buf[(area.left() + x, area.top() + y)];
@@ -164,16 +321,17 @@ impl<'a> Widget for ArtworkWidget<'a> {
             }
         }
 
-        // Draw decorative musical notes in center of placeholder
+        // Draw decorative vinyl/note icon in center of placeholder
         let center_x = area.left() + area.width / 2;
         let center_y = area.top() + area.height / 2;
         if center_x < area.right() && center_y < area.bottom() {
-            let note = "♫";
+            let note = if self.size == ArtSize::Thumb { "♫" } else { "♪  No Art  ♪" };
+            let note_x = center_x.saturating_sub(note.chars().count() as u16 / 2);
             buf.set_string(
-                center_x.saturating_sub(1),
+                note_x,
                 center_y,
                 note,
-                ratatui::style::Style::default().fg(Color::Rgb(158, 206, 106)),
+                Style::default().fg(accent_color),
             );
         }
     }

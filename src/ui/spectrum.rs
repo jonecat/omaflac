@@ -1,21 +1,23 @@
 use crate::audio::visualizer::VisualizerBridge;
-use crate::ui::theme::Theme;
+use crate::ui::theme::OmarchyTheme;
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
 use ratatui::style::Style;
 use ratatui::widgets::Widget;
 
-const BLOCK_CHARS: &[&str] = &[" ", " ", "▂", "▃", "▄", "▅", "▆", "▇", "█"];
+const BLOCK_CHARS: &[&str] = &[" ", "▁", "▂", "▃", "▄", "▅", "▆", "▇", "█"];
 
 pub struct SpectrumWidget<'a> {
     visualizer: &'a VisualizerBridge,
+    theme: &'a OmarchyTheme,
     show_peaks: bool,
 }
 
 impl<'a> SpectrumWidget<'a> {
-    pub fn new(visualizer: &'a VisualizerBridge) -> Self {
+    pub fn new(visualizer: &'a VisualizerBridge, theme: &'a OmarchyTheme) -> Self {
         Self {
             visualizer,
+            theme,
             show_peaks: true,
         }
     }
@@ -36,21 +38,34 @@ impl<'a> Widget for SpectrumWidget<'a> {
         let width = area.width as usize;
         let height = area.height as usize;
 
-        // Determine bar spacing: 1 char per bar or 2 chars per bar
-        let bar_width = if width >= num_bands * 2 { 2 } else { 1 };
-        let spacing = if width >= num_bands * (bar_width + 1) { 1 } else { 0 };
+        // Scale bar width with viewport width while spanning the full width of the viewport
+        let bar_width = if width >= 180 {
+            3
+        } else if width >= 96 {
+            2
+        } else {
+            1
+        };
+        let spacing = if width >= 48 { 1 } else { 0 };
         let total_per_bar = bar_width + spacing;
-        let displayed_bars = (width / total_per_bar).min(num_bands);
+        let displayed_bars = ((width + spacing) / total_per_bar).max(1);
 
-        // Center visualizer within area
-        let total_visualizer_width = displayed_bars * total_per_bar;
+        let total_visualizer_width = displayed_bars * total_per_bar - spacing;
         let start_x = area.left() + ((width.saturating_sub(total_visualizer_width)) / 2) as u16;
 
         for b in 0..displayed_bars {
-            // Map b to bands slice
-            let band_idx = (b * num_bands) / displayed_bars;
-            let val = bands[band_idx].clamp(0.0, 1.0);
-            let peak_val = peaks[band_idx].clamp(0.0, 1.0);
+            let t = if displayed_bars > 1 {
+                b as f32 / (displayed_bars - 1) as f32
+            } else {
+                0.0
+            };
+            let pos = t * (num_bands - 1) as f32;
+            let idx0 = pos.floor() as usize;
+            let idx1 = (idx0 + 1).min(num_bands - 1);
+            let frac = pos - idx0 as f32;
+
+            let val = (bands[idx0] * (1.0 - frac) + bands[idx1] * frac).clamp(0.0, 1.0);
+            let peak_val = (peaks[idx0] * (1.0 - frac) + peaks[idx1] * frac).clamp(0.0, 1.0);
 
             let total_steps = (height * 8) as f32;
             let filled_steps = (val * total_steps).round() as usize;
@@ -59,40 +74,35 @@ impl<'a> Widget for SpectrumWidget<'a> {
             let bar_x_start = start_x + (b * total_per_bar) as u16;
 
             for row in 0..height {
-                // y from bottom (0 = bottom, height-1 = top)
                 let y_from_bottom = row;
                 let term_y = area.bottom() - 1 - row as u16;
 
                 let row_step_start = y_from_bottom * 8;
                 let row_step_end = row_step_start + 8;
 
-                // Color calculation for row
+                // Color gradient using Omarchy theme palette
                 let row_pct = y_from_bottom as f32 / height as f32;
-                let bar_color = if row_pct < 0.4 {
-                    Theme::OMARCHY_GREEN
+                let bar_color = if row_pct < 0.45 {
+                    self.theme.accent
                 } else if row_pct < 0.75 {
-                    Theme::ACCENT_CYAN
+                    self.theme.cyan
                 } else if row_pct < 0.9 {
-                    Theme::ACCENT_YELLOW
+                    self.theme.yellow
                 } else {
-                    Theme::ACCENT_RED
+                    self.theme.red
                 };
 
-                let symbol = if filled_steps >= row_step_end {
-                    BLOCK_CHARS[8] // Full block
+                let (symbol, style) = if filled_steps >= row_step_end {
+                    (BLOCK_CHARS[8], Style::default().fg(bar_color))
                 } else if filled_steps > row_step_start {
                     let sub_step = filled_steps - row_step_start;
-                    BLOCK_CHARS[sub_step]
-                } else if self.show_peaks && peak_step >= row_step_start && peak_step < row_step_end {
-                    "▔" // Peak marker
+                    (BLOCK_CHARS[sub_step], Style::default().fg(bar_color))
+                } else if self.show_peaks && peak_step > 0 && peak_step >= row_step_start && peak_step < row_step_end {
+                    ("▔", Style::default().fg(self.theme.bright_foreground))
+                } else if y_from_bottom == 0 {
+                    ("▁", Style::default().fg(self.theme.muted))
                 } else {
-                    " "
-                };
-
-                let style = if symbol == "▔" {
-                    Style::default().fg(Theme::TEXT_PRIMARY)
-                } else {
-                    Style::default().fg(bar_color)
+                    (" ", Style::default().fg(bar_color))
                 };
 
                 for w in 0..bar_width {

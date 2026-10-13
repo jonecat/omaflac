@@ -1,10 +1,10 @@
 use crate::library::playlist::PlaylistsManager;
 use crate::library::track::Track;
-use crate::ui::theme::Theme;
+use crate::ui::theme::OmarchyTheme;
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
 use ratatui::style::{Modifier, Style};
-use ratatui::widgets::{Block, Borders, Widget};
+use ratatui::widgets::{Block, BorderType, Borders, Widget};
 
 pub struct SongsViewClickTarget {
     pub rect: Rect,
@@ -19,6 +19,7 @@ pub struct SongsView<'a> {
     pub playing_track_id: Option<&'a str>,
     pub playlists_manager: &'a PlaylistsManager,
     pub is_focused: bool,
+    pub theme: &'a OmarchyTheme,
 }
 
 impl<'a> SongsView<'a> {
@@ -29,23 +30,40 @@ impl<'a> SongsView<'a> {
     ) -> Vec<SongsViewClickTarget> {
         let mut targets = Vec::new();
 
-        let border_style = if self.is_focused {
-            Theme::block_focus_style()
+        let (border_style, title_style, title_text) = if self.is_focused {
+            (
+                self.theme.block_focus_style(),
+                self.theme.focused_title_style(),
+                format!(" ● Songs ({}) ", self.tracks.len()),
+            )
         } else {
-            Theme::block_style()
+            (
+                self.theme.block_style(),
+                self.theme.unfocused_title_style(),
+                format!(" Songs ({}) ", self.tracks.len()),
+            )
         };
 
         let block = Block::default()
             .borders(Borders::ALL)
+            .border_type(BorderType::Rounded)
             .border_style(border_style)
-            .title(format!(" Songs ({}) ", self.tracks.len()))
-            .title_style(Style::default().fg(Theme::OMARCHY_GREEN).add_modifier(Modifier::BOLD));
+            .style(Style::default().bg(self.theme.background))
+            .title(title_text)
+            .title_style(title_style);
 
         let inner = block.inner(area);
         block.render(area, buf);
 
         if inner.width < 10 || inner.height < 2 {
             return targets;
+        }
+
+        // Fill background
+        for y in inner.top()..inner.bottom() {
+            for x in inner.left()..inner.right() {
+                buf[(x, y)].set_bg(self.theme.background);
+            }
         }
 
         // Header row
@@ -57,8 +75,6 @@ impl<'a> SongsView<'a> {
             is_header: true,
         });
 
-        // Column widths
-        // [Fav 2] [Status 2] [Title 35%] [Artist 25%] [Album 25%] [Time 6] [Format 5]
         let col_fav_w = 2u16;
         let col_stat_w = 2u16;
         let col_time_w = 7u16;
@@ -77,9 +93,8 @@ impl<'a> SongsView<'a> {
         let col_time_x = col_album_x + col_album_w + 1;
         let col_fmt_x = col_time_x + col_time_w + 1;
 
-        // Render header strings
-        let hdr_style = Style::default().fg(Theme::TEXT_MUTED).add_modifier(Modifier::BOLD);
-        buf.set_string(col_fav_x, y_hdr, "⭐", hdr_style);
+        let hdr_style = Style::default().fg(self.theme.muted).add_modifier(Modifier::BOLD);
+        buf.set_string(col_fav_x, y_hdr, "★ ", hdr_style);
         buf.set_string(col_stat_x, y_hdr, "  ", hdr_style);
         buf.set_string(col_title_x, y_hdr, "TITLE", hdr_style);
         buf.set_string(col_artist_x, y_hdr, "ARTIST", hdr_style);
@@ -90,7 +105,7 @@ impl<'a> SongsView<'a> {
         let rows_available = inner.height.saturating_sub(1) as usize;
         let num_tracks = self.tracks.len();
 
-        let start_idx = self.scroll_offset.min(num_tracks);
+        let start_idx = self.scroll_offset.min(num_tracks.saturating_sub(rows_available));
         let end_idx = (start_idx + rows_available).min(num_tracks);
 
         for (i, track) in self.tracks[start_idx..end_idx].iter().enumerate() {
@@ -108,65 +123,71 @@ impl<'a> SongsView<'a> {
                 is_header: false,
             });
 
-            // Row styling
             let base_style = if is_selected {
-                Theme::selected_row()
+                self.theme.selected_row()
             } else if is_playing {
-                Style::default().fg(Theme::OMARCHY_GREEN).add_modifier(Modifier::BOLD)
+                Style::default().fg(self.theme.accent).add_modifier(Modifier::BOLD)
             } else {
-                Style::default().fg(Theme::TEXT_PRIMARY)
+                Style::default().fg(self.theme.foreground)
             };
 
-            // Background fill
             if is_selected {
                 for x in row_rect.left()..row_rect.right() {
-                    buf[(x, row_y)].set_bg(Theme::BG_HIGHLIGHT);
+                    buf[(x, row_y)].set_bg(self.theme.selection);
                 }
             }
 
-            // Favorite star
             if is_fav {
-                buf.set_string(col_fav_x, row_y, "★ ", Style::default().fg(Theme::ACCENT_YELLOW));
+                let fav_style = if is_selected {
+                    base_style
+                } else {
+                    Style::default().fg(self.theme.accent)
+                };
+                buf.set_string(col_fav_x, row_y, "★ ", fav_style);
             } else {
                 buf.set_string(col_fav_x, row_y, "  ", base_style);
             }
 
-            // Status icon (Playing: ▶)
             if is_playing {
-                buf.set_string(col_stat_x, row_y, "▶ ", Style::default().fg(Theme::OMARCHY_GREEN).add_modifier(Modifier::BOLD));
+                buf.set_string(col_stat_x, row_y, "▶ ", Style::default().fg(self.theme.accent).add_modifier(Modifier::BOLD));
             } else {
                 buf.set_string(col_stat_x, row_y, "  ", base_style);
             }
 
-            // Title
             let title: String = track.display_title().chars().take(col_title_w as usize).collect();
             buf.set_string(col_title_x, row_y, &title, base_style);
 
-            // Artist
-            let artist_style = if is_selected { base_style } else { Style::default().fg(Theme::TEXT_SECONDARY) };
+            let artist_style = if is_selected { base_style } else { Style::default().fg(self.theme.light_foreground) };
             let artist: String = track.display_artist().chars().take(col_artist_w as usize).collect();
             buf.set_string(col_artist_x, row_y, &artist, artist_style);
 
-            // Album
-            let album_style = if is_selected { base_style } else { Style::default().fg(Theme::TEXT_SECONDARY) };
+            let album_style = if is_selected { base_style } else { Style::default().fg(self.theme.light_foreground) };
             let album: String = track.display_album().chars().take(col_album_w as usize).collect();
             buf.set_string(col_album_x, row_y, &album, album_style);
 
-            // Duration
             let time_str = track.formatted_duration();
-            buf.set_string(col_time_x, row_y, &time_str, Style::default().fg(Theme::TEXT_MUTED));
+            buf.set_string(col_time_x, row_y, &time_str, Style::default().fg(self.theme.muted));
 
-            // Format badge
             let fmt_style = if is_selected {
                 base_style
             } else if track.format == "FLAC" {
-                Style::default().fg(Theme::OMARCHY_GREEN)
+                Style::default().fg(self.theme.accent)
             } else {
-                Style::default().fg(Theme::ACCENT_CYAN)
+                Style::default().fg(self.theme.cyan)
             };
             let fmt: String = track.format.chars().take(col_fmt_w as usize).collect();
             buf.set_string(col_fmt_x, row_y, &fmt, fmt_style);
         }
+
+        self.theme.render_scrollbar(
+            buf,
+            area,
+            y_hdr + 1,
+            inner.height.saturating_sub(1),
+            start_idx,
+            rows_available,
+            num_tracks,
+        );
 
         targets
     }

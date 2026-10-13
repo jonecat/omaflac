@@ -61,6 +61,40 @@ impl AudioEngine {
         self.player.play(track);
     }
 
+    pub fn set_next_track(&self, track: Option<Track>) {
+        self.player.set_next_track(track);
+    }
+
+    pub fn on_track_transitioned(&self, track: &Track) {
+        // Cancel previous waveform scanner and start for new track
+        self.waveform_cancel_token.store(true, Ordering::Relaxed);
+        let fast_waveform = WaveformData::generate_fast_estimate(track.path.clone(), track.duration_secs);
+        if let Ok(mut wf) = self.current_waveform.lock() {
+            *wf = Some(fast_waveform);
+        }
+
+        let cancel_token = Arc::new(AtomicBool::new(false));
+        self.waveform_cancel_token.store(false, Ordering::Relaxed);
+        let track_path = track.path.clone();
+        let wf_target = Arc::clone(&self.current_waveform);
+        let cancel_clone = Arc::clone(&cancel_token);
+
+        std::thread::Builder::new()
+            .name("waveform-scanner".into())
+            .spawn(move || {
+                if let Some(peaks) = WaveformData::compute_accurate(&track_path, waveform::DEFAULT_WAVEFORM_BINS, cancel_clone) {
+                    if let Ok(mut wf) = wf_target.lock() {
+                        *wf = Some(WaveformData {
+                            path: track_path,
+                            peaks,
+                            is_complete: true,
+                        });
+                    }
+                }
+            })
+            .ok();
+    }
+
     pub fn pause(&self) {
         self.player.pause();
     }

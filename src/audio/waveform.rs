@@ -9,7 +9,7 @@ use symphonia::core::io::MediaSourceStream;
 use symphonia::core::meta::MetadataOptions;
 use symphonia::core::probe::Hint;
 
-pub const DEFAULT_WAVEFORM_BINS: usize = 160;
+pub const DEFAULT_WAVEFORM_BINS: usize = 512;
 
 #[derive(Debug, Clone)]
 pub struct WaveformData {
@@ -35,8 +35,10 @@ impl WaveformData {
         for i in 0..DEFAULT_WAVEFORM_BINS {
             let x = i as f32 / n;
             let shape = (x * std::f32::consts::PI).sin();
-            let ripple = ((x * 24.0 + seed * 0.1).sin() * 0.2).abs();
-            let val = (shape * 0.7 + ripple + 0.15).clamp(0.08, 0.95);
+            let chorus1 = (x * 16.0 + seed * 0.1).sin().abs() * 0.25;
+            let chorus2 = (x * 32.0 + seed * 0.3).cos().abs() * 0.15;
+            let ripple = (x * 64.0 + seed * 0.7).sin().abs() * 0.1;
+            let val = (shape * 0.6 + chorus1 + chorus2 + ripple + 0.1).powf(0.8).clamp(0.06, 0.98);
             peaks.push(val);
         }
         Self {
@@ -94,8 +96,8 @@ impl WaveformData {
             }
 
             packet_count += 1;
-            // Downsample: sample every 3rd packet for fast waveform generation
-            if packet_count % 3 != 0 {
+            // Downsample: sample every 2nd packet for high-fidelity fast scan
+            if packet_count % 2 != 0 {
                 continue;
             }
 
@@ -110,14 +112,21 @@ impl WaveformData {
                     if let Some(buf) = sample_buf.as_mut() {
                         buf.copy_interleaved_ref(decoded);
                         let samples = buf.samples();
-                        let mut max_abs = 0.0f32;
-                        for &s in samples {
-                            let abs = s.abs();
-                            if abs > max_abs {
-                                max_abs = abs;
+                        if !samples.is_empty() {
+                            let mut max_abs = 0.0f32;
+                            let mut sum_sq = 0.0f32;
+                            for &s in samples {
+                                let abs = s.abs();
+                                if abs > max_abs {
+                                    max_abs = abs;
+                                }
+                                sum_sq += abs * abs;
                             }
+                            let rms = (sum_sq / samples.len() as f32).sqrt();
+                            // Combined peak and RMS energy
+                            let energy = max_abs * 0.7 + rms * 0.3;
+                            all_chunk_peaks.push(energy);
                         }
-                        all_chunk_peaks.push(max_abs);
                     }
                 }
                 Err(symphonia::core::errors::Error::DecodeError(_)) => continue,
@@ -137,7 +146,7 @@ impl WaveformData {
         let mut global_max = 0.001f32;
         for i in 0..num_bins {
             let start = ((i as f32 * chunks_per_bin).floor() as usize).min(total_chunks - 1);
-            let end = (((i + 1) as f32 * chunks_per_bin).ceil() as usize).min(total_chunks);
+            let end = (((i + 1) as f32 * chunks_per_bin).ceil() as usize).max(start + 1).min(total_chunks);
 
             let mut peak = 0.0f32;
             for j in start..end {
@@ -151,9 +160,9 @@ impl WaveformData {
             }
         }
 
-        // Normalize
+        // Perceptual dynamic normalization (logarithmic/power curve)
         for b in &mut final_bins {
-            *b = (*b / global_max).clamp(0.05, 1.0);
+            *b = ((*b / global_max).powf(0.75)).clamp(0.04, 1.0);
         }
 
         Some(final_bins)

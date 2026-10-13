@@ -1,15 +1,15 @@
-use crate::ui::theme::Theme;
+use crate::ui::theme::OmarchyTheme;
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
 use ratatui::style::{Modifier, Style};
-use ratatui::widgets::{Block, Borders, Clear, Widget};
+use ratatui::widgets::{Block, BorderType, Borders, Clear, Widget};
 
 pub struct HelpModal;
 
 impl HelpModal {
-    pub fn render(area: Rect, buf: &mut Buffer) {
-        let width = 64u16.min(area.width.saturating_sub(4));
-        let height = 22u16.min(area.height.saturating_sub(2));
+    pub fn render(area: Rect, buf: &mut Buffer, theme: &OmarchyTheme) {
+        let width = 76u16.min(area.width.saturating_sub(2));
+        let height = 23u16.min(area.height.saturating_sub(2));
 
         let x = area.left() + (area.width.saturating_sub(width)) / 2;
         let y = area.top() + (area.height.saturating_sub(height)) / 2;
@@ -19,49 +19,49 @@ impl HelpModal {
 
         let block = Block::default()
             .borders(Borders::ALL)
-            .border_style(Theme::block_focus_style())
-            .title(" omaflac Keyboard & Mouse Controls ")
-            .title_style(Style::default().fg(Theme::OMARCHY_GREEN).add_modifier(Modifier::BOLD));
+            .border_type(BorderType::Rounded)
+            .border_style(theme.block_focus_style())
+            .style(Style::default().bg(theme.lighter_background))
+            .title(" OmaFLAC Controls ")
+            .title_style(theme.accent_text());
 
         let inner = block.inner(modal_rect);
-        block.render(modal_rect, buf);
 
-        for my in inner.top()..inner.bottom() {
-            for mx in inner.left()..inner.right() {
-                buf[(mx, my)].set_bg(Theme::BG_CARD);
+        for my in modal_rect.top()..modal_rect.bottom() {
+            for mx in modal_rect.left()..modal_rect.right() {
+                buf[(mx, my)].set_bg(theme.lighter_background);
             }
         }
+        block.render(modal_rect, buf);
 
-        let key_style = Style::default().fg(Theme::ACCENT_CYAN).add_modifier(Modifier::BOLD);
-        let desc_style = Style::default().fg(Theme::TEXT_PRIMARY);
-        let section_style = Style::default().fg(Theme::OMARCHY_GREEN).add_modifier(Modifier::BOLD);
+        let key_style = Style::default().fg(theme.cyan).add_modifier(Modifier::BOLD);
+        let desc_style = theme.primary_text();
+        let section_style = theme.accent_text();
 
         let lines = [
             ("NAVIGATION", ""),
-            ("  Tab / Shift-Tab", "Switch focus between Sidebar & Main view"),
-            ("  j / k / ↑ / ↓  ", "Navigate items or rows"),
-            ("  h / l / ← / →  ", "Switch columns in Artists view or seek"),
-            ("  1 .. 7         ", "Directly switch views (Songs, Artists, Albums...)"),
+            ("  Tab / Shift-Tab", "Cycle focus: Sidebar ↔ Main ↔ Player"),
+            ("  j / k / ↑ / ↓  ", "Navigate items or adjust volume"),
+            ("  h / l / ← / →  ", "Switch columns or Prev/Next track"),
+            ("  1 .. 6         ", "Directly switch views (Artists, Albums...)"),
             ("", ""),
             ("PLAYBACK", ""),
-            ("  Space          ", "Play / Pause playback"),
-            ("  Enter          ", "Play currently selected track / album"),
+            ("  Space / Enter  ", "Play / Pause playback"),
             ("  n / p          ", "Next / Previous track"),
-            ("  ← / →          ", "Seek backward / forward 5 seconds"),
-            ("  + / -          ", "Increase / decrease volume"),
-            ("  m              ", "Mute / unmute audio"),
-            ("  r / z          ", "Cycle repeat mode / toggle shuffle"),
+            ("  + / -          ", "Adjust volume (m: Mute)"),
+            ("  r / z          ", "Repeat mode / Toggle shuffle"),
             ("", ""),
             ("LIBRARY & PLAYLISTS", ""),
-            ("  /              ", "Global search across tracks, artists, albums"),
+            ("  /              ", "Global search across library"),
             ("  a              ", "Add selected track to playlist"),
-            ("  f              ", "Toggle favorite status for track"),
+            ("  f              ", "Toggle favorite status"),
+            ("  r / D          ", "Rename / Delete playlist (in Playlists)"),
+            ("  d              ", "Remove track from playlist"),
             ("", ""),
-            ("MOUSE & TOUCH", ""),
-            ("  Click anywhere ", "Activate view, play track, seek waveform, set volume"),
-            ("  Mouse wheel    ", "Scroll lists, adjust volume when hovering volume bar"),
-            ("", ""),
-            ("  ? / Esc        ", "Close this help overlay"),
+            ("MOUSE & SHORTCUTS", ""),
+            ("  Click anywhere ", "Activate view, play, seek, volume"),
+            ("  Scroll wheel   ", "Scroll lists or adjust volume"),
+            ("  ? / Esc        ", "Close help overlay"),
         ];
 
         let mut cur_y = inner.top();
@@ -70,10 +70,19 @@ impl HelpModal {
                 break;
             }
             if d.is_empty() {
-                buf.set_string(inner.left(), cur_y, k, section_style);
+                let max_w = inner.right().saturating_sub(inner.left()) as usize;
+                let trunc_k: String = k.chars().take(max_w).collect();
+                buf.set_string(inner.left(), cur_y, &trunc_k, section_style);
             } else {
-                buf.set_string(inner.left(), cur_y, k, key_style);
-                buf.set_string(inner.left() + 20, cur_y, d, desc_style);
+                let key_col_w = 19u16;
+                let key_w = key_col_w.min(inner.width) as usize;
+                let trunc_k: String = k.chars().take(key_w).collect();
+                buf.set_string(inner.left(), cur_y, &trunc_k, key_style);
+
+                let desc_x = (inner.left() + key_col_w).min(inner.right());
+                let max_desc_w = inner.right().saturating_sub(desc_x) as usize;
+                let trunc_d: String = d.chars().take(max_desc_w).collect();
+                buf.set_string(desc_x, cur_y, &trunc_d, desc_style);
             }
             cur_y += 1;
         }

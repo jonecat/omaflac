@@ -1,20 +1,36 @@
-use crate::library::AlbumSummary;
-use crate::ui::theme::Theme;
+use crate::library::playlist::PlaylistsManager;
+use crate::library::track::Track;
+use crate::library::{AlbumSummary, Library};
+use crate::ui::theme::OmarchyTheme;
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
-use ratatui::style::{Modifier, Style};
-use ratatui::widgets::{Block, Borders, Widget};
+use ratatui::style::Style;
+use ratatui::widgets::{Block, BorderType, Borders, Widget};
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AlbumColumn {
+    Albums,
+    Songs,
+}
 
 pub struct AlbumsViewClickTarget {
     pub rect: Rect,
-    pub album_index: usize,
+    pub column: AlbumColumn,
+    pub item_index: usize,
 }
 
 pub struct AlbumsView<'a> {
+    pub library: &'a Library,
     pub albums: &'a [AlbumSummary],
-    pub selected_index: usize,
-    pub scroll_offset: usize,
+    pub active_column: AlbumColumn,
+    pub selected_album_idx: usize,
+    pub selected_song_idx: usize,
+    pub scroll_album_offset: usize,
+    pub scroll_song_offset: usize,
+    pub playing_track_id: Option<&'a str>,
+    pub playlists_manager: &'a PlaylistsManager,
     pub is_focused: bool,
+    pub theme: &'a OmarchyTheme,
 }
 
 impl<'a> AlbumsView<'a> {
@@ -25,98 +41,258 @@ impl<'a> AlbumsView<'a> {
     ) -> Vec<AlbumsViewClickTarget> {
         let mut targets = Vec::new();
 
-        let border_style = if self.is_focused {
-            Theme::block_focus_style()
+        if area.width < 15 || area.height < 4 {
+            return targets;
+        }
+
+        // Fill background
+        for y in area.top()..area.bottom() {
+            for x in area.left()..area.right() {
+                buf[(x, y)].set_bg(self.theme.background);
+            }
+        }
+
+        // Split area into 2 panes: Albums (45%) and Songs (55%)
+        let total_w = area.width;
+        let col1_w = (total_w as f32 * 0.45) as u16;
+        let col2_w = total_w.saturating_sub(col1_w);
+
+        let col1_rect = Rect::new(area.left(), area.top(), col1_w, area.height);
+        let col2_rect = Rect::new(area.left() + col1_w, area.top(), col2_w, area.height);
+
+        let current_album = self.albums.get(self.selected_album_idx);
+        let songs: Vec<&Track> = if let Some(alb) = current_album {
+            self.library.tracks_by_artist_and_album(&alb.artist, &alb.album)
         } else {
-            Theme::block_style()
+            Vec::new()
+        };
+
+        // Render Pane 1: Albums List
+        targets.extend(self.render_albums_pane(col1_rect, buf));
+
+        // Render Pane 2: Songs within the selected album
+        targets.extend(self.render_songs_pane(col2_rect, &songs, current_album, buf));
+
+        targets
+    }
+
+    fn render_albums_pane(
+        &self,
+        area: Rect,
+        buf: &mut Buffer,
+    ) -> Vec<AlbumsViewClickTarget> {
+        let mut targets = Vec::new();
+        let is_col_focused = self.is_focused && self.active_column == AlbumColumn::Albums;
+
+        let (b_style, t_style, title_text) = if is_col_focused {
+            (
+                self.theme.block_focus_style(),
+                self.theme.focused_title_style(),
+                format!(" ● Albums ({}) ", self.albums.len()),
+            )
+        } else {
+            (
+                self.theme.block_style(),
+                self.theme.unfocused_title_style(),
+                format!(" Albums ({}) ", self.albums.len()),
+            )
         };
 
         let block = Block::default()
             .borders(Borders::ALL)
-            .border_style(border_style)
-            .title(format!(" Albums ({}) ", self.albums.len()))
-            .title_style(Style::default().fg(Theme::OMARCHY_GREEN).add_modifier(Modifier::BOLD));
+            .border_type(BorderType::Rounded)
+            .border_style(b_style)
+            .style(Style::default().bg(self.theme.background))
+            .title(title_text)
+            .title_style(t_style);
 
         let inner = block.inner(area);
         block.render(area, buf);
 
-        if inner.width < 10 || inner.height < 2 {
+        if inner.width < 4 || inner.height < 1 {
             return targets;
         }
 
-        let y_hdr = inner.top();
-        let hdr_style = Style::default().fg(Theme::TEXT_MUTED).add_modifier(Modifier::BOLD);
+        if self.albums.is_empty() {
+            buf.set_string(
+                inner.left() + 1,
+                inner.top() + 1,
+                "No albums found in library",
+                self.theme.muted_text(),
+            );
+            return targets;
+        }
 
-        let col_art_w = 4u16;
-        let col_yr_w = 6u16;
-        let col_cnt_w = 10u16;
-        let col_dur_w = 8u16;
+        let max_rows = inner.height as usize;
+        let start = self.scroll_album_offset.min(self.albums.len().saturating_sub(max_rows));
+        let visible_albums = &self.albums[start..];
 
-        let remaining = inner.width.saturating_sub(col_art_w + col_yr_w + col_cnt_w + col_dur_w + 3);
-        let col_alb_w = (remaining as f32 * 0.55) as u16;
-        let col_artist_w = remaining.saturating_sub(col_alb_w);
-
-        let col_art_x = inner.left();
-        let col_alb_x = col_art_x + col_art_w;
-        let col_artist_x = col_alb_x + col_alb_w + 1;
-        let col_yr_x = col_artist_x + col_artist_w + 1;
-        let col_cnt_x = col_yr_x + col_yr_w + 1;
-        let col_dur_x = col_cnt_x + col_cnt_w + 1;
-
-        buf.set_string(col_art_x, y_hdr, "ART", hdr_style);
-        buf.set_string(col_alb_x, y_hdr, "ALBUM", hdr_style);
-        buf.set_string(col_artist_x, y_hdr, "ARTIST", hdr_style);
-        buf.set_string(col_yr_x, y_hdr, "YEAR", hdr_style);
-        buf.set_string(col_cnt_x, y_hdr, "TRACKS", hdr_style);
-        buf.set_string(col_dur_x, y_hdr, "DURATION", hdr_style);
-
-        let rows_avail = inner.height.saturating_sub(1) as usize;
-        let start_idx = self.scroll_offset.min(self.albums.len());
-        let end_idx = (start_idx + rows_avail).min(self.albums.len());
-
-        for (i, album) in self.albums[start_idx..end_idx].iter().enumerate() {
-            let actual_idx = start_idx + i;
-            let y = y_hdr + 1 + i as u16;
-            let is_sel = actual_idx == self.selected_index;
+        for (i, album) in visible_albums.iter().enumerate().take(max_rows) {
+            let actual_idx = start + i;
+            let y = inner.top() + i as u16;
+            let is_selected = actual_idx == self.selected_album_idx;
 
             let row_rect = Rect::new(inner.left(), y, inner.width, 1);
             targets.push(AlbumsViewClickTarget {
                 rect: row_rect,
-                album_index: actual_idx,
+                column: AlbumColumn::Albums,
+                item_index: actual_idx,
+            });
+
+            let style = if is_selected {
+                self.theme.selected_row()
+            } else {
+                self.theme.primary_text()
+            };
+
+            if is_selected {
+                for col in row_rect.left()..row_rect.right() {
+                    buf[(col, y)].set_bg(self.theme.selection);
+                }
+            }
+
+            let yr_str = album.year.map(|y| format!("{} • ", y)).unwrap_or_default();
+            let meta = format!(" — {} ({}{} trk)", album.artist, yr_str, album.track_count);
+            let avail_w = inner.width as usize;
+            let meta_chars = meta.chars().count();
+            let title_avail = avail_w.saturating_sub(meta_chars);
+            let trunc_title: String = album.album.chars().take(title_avail.max(6)).collect();
+
+            let full_line = format!("{}{}", trunc_title, meta);
+            let trunc_line: String = full_line.chars().take(inner.width as usize).collect();
+            buf.set_string(inner.left(), y, &trunc_line, style);
+        }
+        self.theme.render_scrollbar(
+            buf,
+            area,
+            inner.top(),
+            inner.height,
+            start,
+            max_rows,
+            self.albums.len(),
+        );
+
+        targets
+    }
+
+    fn render_songs_pane(
+        &self,
+        area: Rect,
+        songs: &[&Track],
+        current_album: Option<&AlbumSummary>,
+        buf: &mut Buffer,
+    ) -> Vec<AlbumsViewClickTarget> {
+        let mut targets = Vec::new();
+        let is_col_focused = self.is_focused && self.active_column == AlbumColumn::Songs;
+
+        let album_name = current_album
+            .map(|a| a.album.as_str())
+            .unwrap_or("No Album Selected");
+
+        let (b_style, t_style, title_text) = if is_col_focused {
+            (
+                self.theme.block_focus_style(),
+                self.theme.focused_title_style(),
+                format!(" ● {} — Songs ({}) ", album_name, songs.len()),
+            )
+        } else {
+            (
+                self.theme.block_style(),
+                self.theme.unfocused_title_style(),
+                format!(" {} — Songs ({}) ", album_name, songs.len()),
+            )
+        };
+
+        let block = Block::default()
+            .borders(Borders::ALL)
+            .border_type(BorderType::Rounded)
+            .border_style(b_style)
+            .style(Style::default().bg(self.theme.background))
+            .title(title_text)
+            .title_style(t_style);
+
+        let inner = block.inner(area);
+        block.render(area, buf);
+
+        if inner.width < 4 || inner.height < 1 {
+            return targets;
+        }
+
+        if songs.is_empty() {
+            buf.set_string(
+                inner.left() + 1,
+                inner.top() + 1,
+                "No songs in selected album",
+                self.theme.muted_text(),
+            );
+            return targets;
+        }
+
+        let max_rows = inner.height as usize;
+        let start = self.scroll_song_offset.min(songs.len().saturating_sub(max_rows));
+        let visible_songs = &songs[start..];
+
+        for (i, song) in visible_songs.iter().enumerate().take(max_rows) {
+            let actual_idx = start + i;
+            let y = inner.top() + i as u16;
+            let is_sel = actual_idx == self.selected_song_idx;
+            let is_playing = self.playing_track_id == Some(&song.id);
+            let is_fav = self.playlists_manager.is_favorite(&song.id);
+
+            let row_rect = Rect::new(inner.left(), y, inner.width, 1);
+            targets.push(AlbumsViewClickTarget {
+                rect: row_rect,
+                column: AlbumColumn::Songs,
+                item_index: actual_idx,
             });
 
             let style = if is_sel {
-                Theme::selected_row()
+                self.theme.selected_row()
+            } else if is_playing {
+                self.theme.accent_text()
             } else {
-                Style::default().fg(Theme::TEXT_PRIMARY)
+                self.theme.primary_text()
             };
 
             if is_sel {
                 for x in row_rect.left()..row_rect.right() {
-                    buf[(x, y)].set_bg(Theme::BG_HIGHLIGHT);
+                    buf[(x, y)].set_bg(self.theme.selection);
                 }
             }
 
-            let art_badge = if album.has_cover_art { "🖼 " } else { "💿 " };
-            buf.set_string(col_art_x, y, art_badge, style);
+            let play_prefix = if is_playing { "▶" } else { " " };
+            let fav_prefix = if is_fav { "★ " } else { "  " };
+            let trk_num = song
+                .track_number
+                .map(|n| format!("{:02}. ", n))
+                .unwrap_or_else(|| format!("{:02}. ", actual_idx + 1));
+            let duration_str = song.formatted_duration();
 
-            let alb_str: String = album.album.chars().take(col_alb_w as usize).collect();
-            buf.set_string(col_alb_x, y, &alb_str, style);
+            let prefix = format!("{} {}{}", play_prefix, fav_prefix, trk_num);
+            let prefix_chars = prefix.chars().count() as u16;
+            let title_avail = inner
+                .width
+                .saturating_sub(prefix_chars + duration_str.len() as u16 + 2)
+                as usize;
+            let title: String = song.display_title().chars().take(title_avail).collect();
 
-            let artist_style = if is_sel { style } else { Style::default().fg(Theme::TEXT_SECONDARY) };
-            let artist_str: String = album.artist.chars().take(col_artist_w as usize).collect();
-            buf.set_string(col_artist_x, y, &artist_str, artist_style);
+            let line = format!("{}{}", prefix, title);
+            buf.set_string(inner.left(), y, &line, style);
 
-            let yr_str = album.year.map(|y| y.to_string()).unwrap_or_else(|| "—".into());
-            buf.set_string(col_yr_x, y, &yr_str, Style::default().fg(Theme::TEXT_MUTED));
-
-            let cnt_str = format!("{} songs", album.track_count);
-            buf.set_string(col_cnt_x, y, &cnt_str, Style::default().fg(Theme::TEXT_SECONDARY));
-
-            let dur_str = album.formatted_duration();
-            buf.set_string(col_dur_x, y, &dur_str, Style::default().fg(Theme::TEXT_MUTED));
+            let time_x = inner.right().saturating_sub(duration_str.len() as u16);
+            buf.set_string(time_x, y, &duration_str, self.theme.muted_text());
         }
+        self.theme.render_scrollbar(
+            buf,
+            area,
+            inner.top(),
+            inner.height,
+            start,
+            max_rows,
+            songs.len(),
+        );
 
         targets
     }
 }
+

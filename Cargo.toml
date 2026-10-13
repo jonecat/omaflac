@@ -6,7 +6,7 @@ authors = ["omaflac contributors"]
 description = "High quality TUI audio player for Omarchy Linux"
 
 [dependencies]
-ratatui = { version = "0.29", features = ["crossterm", "all-widgets"] }
+ratatui = { version = "0.30", features = ["crossterm", "all-widgets"] }
 crossterm = { version = "0.28", features = ["event-stream"] }
 symphonia = { version = "0.5", features = ["all"] }
 cpal = "0.15"
@@ -21,6 +21,7 @@ anyhow = "1.0"
 unicode-width = "0.2"
 rand = "0.8"
 crossbeam-channel = "0.5"
+ratatui-image = "11.1.0"
 
 [profile.release]
 opt-level = 3

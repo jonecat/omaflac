@@ -1,9 +1,9 @@
 use crate::library::playlist::PlaylistsManager;
-use crate::ui::theme::Theme;
+use crate::ui::theme::OmarchyTheme;
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
 use ratatui::style::{Modifier, Style};
-use ratatui::widgets::{Block, Borders, Widget};
+use ratatui::widgets::{Block, BorderType, Borders, Widget};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ViewMode {
@@ -11,9 +11,11 @@ pub enum ViewMode {
     Artists,
     Albums,
     NowPlaying,
-    Playlists,
+    #[allow(dead_code)]
     FileBrowser,
+    Playlists,
     Settings,
+    SearchResults,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -36,6 +38,7 @@ pub struct SidebarComponent<'a> {
     pub playlists_manager: &'a PlaylistsManager,
     pub is_focused: bool,
     pub selected_index: usize,
+    pub theme: &'a OmarchyTheme,
 }
 
 impl<'a> SidebarComponent<'a> {
@@ -44,43 +47,38 @@ impl<'a> SidebarComponent<'a> {
 
         // LIBRARY
         items.push((
-            SidebarItem::View(ViewMode::Songs),
-            " 🎵 Songs".to_string(),
-            self.current_view == ViewMode::Songs,
-        ));
-        items.push((
             SidebarItem::View(ViewMode::Artists),
-            " 🧑‍🎤 Artists".to_string(),
+            " ◇ Artists".to_string(),
             self.current_view == ViewMode::Artists,
         ));
         items.push((
             SidebarItem::View(ViewMode::Albums),
-            " 💿 Albums".to_string(),
+            " ◉ Albums".to_string(),
             self.current_view == ViewMode::Albums,
         ));
         items.push((
-            SidebarItem::View(ViewMode::NowPlaying),
-            " 📊 Now Playing".to_string(),
-            self.current_view == ViewMode::NowPlaying,
+            SidebarItem::View(ViewMode::Songs),
+            " ♪ Songs".to_string(),
+            self.current_view == ViewMode::Songs,
         ));
         items.push((
-            SidebarItem::View(ViewMode::FileBrowser),
-            " 📂 File Browser".to_string(),
-            self.current_view == ViewMode::FileBrowser,
+            SidebarItem::View(ViewMode::NowPlaying),
+            " ∿ Now Playing".to_string(),
+            self.current_view == ViewMode::NowPlaying,
         ));
 
         // PLAYLISTS
         let is_fav_active = self.current_view == ViewMode::Playlists && self.current_playlist_id == Some("__favorites__");
         items.push((
             SidebarItem::Favorites,
-            format!(" ⭐ Favorites ({})", self.playlists_manager.favorites.len()),
+            format!(" ★ Favorites ({})", self.playlists_manager.favorites.len()),
             is_fav_active,
         ));
 
         let is_recent_active = self.current_view == ViewMode::Playlists && self.current_playlist_id == Some("__recent__");
         items.push((
             SidebarItem::RecentlyPlayed,
-            " 🕒 Recently Played".to_string(),
+            " ◷ Recently Played".to_string(),
             is_recent_active,
         ));
 
@@ -88,21 +86,21 @@ impl<'a> SidebarComponent<'a> {
             let is_active = self.current_view == ViewMode::Playlists && self.current_playlist_id == Some(&p.id);
             items.push((
                 SidebarItem::CustomPlaylist(p.id.clone()),
-                format!(" 📑 {}", p.name),
+                format!(" ≡ {}", p.name),
                 is_active,
             ));
         }
 
         items.push((
             SidebarItem::NewPlaylist,
-            " ➕ New Playlist...".to_string(),
+            " + New Playlist...".to_string(),
             false,
         ));
 
         // SYSTEM
         items.push((
             SidebarItem::View(ViewMode::Settings),
-            " ⚙️ Settings / Folders".to_string(),
+            "  Settings".to_string(),
             self.current_view == ViewMode::Settings,
         ));
 
@@ -116,23 +114,40 @@ impl<'a> SidebarComponent<'a> {
     ) -> Vec<SidebarClickTarget> {
         let mut click_targets = Vec::new();
 
-        let border_style = if self.is_focused {
-            Theme::block_focus_style()
+        let (border_style, title_style, title_text) = if self.is_focused {
+            (
+                self.theme.block_focus_style(),
+                self.theme.focused_title_style(),
+                " ● Library ",
+            )
         } else {
-            Theme::block_style()
+            (
+                self.theme.block_style(),
+                self.theme.unfocused_title_style(),
+                " Library ",
+            )
         };
 
         let block = Block::default()
             .borders(Borders::ALL)
+            .border_type(BorderType::Rounded)
             .border_style(border_style)
-            .title(" Library ")
-            .title_style(Style::default().fg(Theme::OMARCHY_GREEN).add_modifier(Modifier::BOLD));
+            .style(Style::default().bg(self.theme.dark_background))
+            .title(title_text)
+            .title_style(title_style);
 
         let inner = block.inner(area);
         block.render(area, buf);
 
         if inner.width < 4 || inner.height < 4 {
             return click_targets;
+        }
+
+        // Fill background
+        for y in inner.top()..inner.bottom() {
+            for x in inner.left()..inner.right() {
+                buf[(x, y)].set_bg(self.theme.dark_background);
+            }
         }
 
         let mut y = inner.top();
@@ -146,30 +161,30 @@ impl<'a> SidebarComponent<'a> {
                 inner.left(),
                 y,
                 "LIBRARY",
-                Style::default().fg(Theme::TEXT_MUTED).add_modifier(Modifier::BOLD),
+                Style::default().fg(self.theme.muted).add_modifier(Modifier::BOLD),
             );
             y += 1;
         }
 
-        for (item, label, is_active) in &items[0..5] {
+        for (item, label, is_active) in &items[0..4] {
             if y >= inner.bottom() {
                 break;
             }
             let is_cursor = self.is_focused && self.selected_index == item_idx;
             let style = if *is_active {
-                Style::default().bg(Theme::BG_HIGHLIGHT).fg(Theme::OMARCHY_GREEN).add_modifier(Modifier::BOLD)
+                self.theme.selected_row()
             } else if is_cursor {
-                Style::default().bg(Theme::BG_CARD).fg(Theme::TEXT_PRIMARY).add_modifier(Modifier::BOLD)
+                Style::default().bg(self.theme.lighter_background).fg(self.theme.bright_foreground).add_modifier(Modifier::BOLD)
             } else {
-                Style::default().fg(Theme::TEXT_PRIMARY)
+                Style::default().fg(self.theme.foreground)
             };
 
             let row_rect = Rect::new(inner.left(), y, inner.width, 1);
-            // Fill background
             for x in row_rect.left()..row_rect.right() {
                 buf[(x, y)].set_style(style);
             }
-            buf.set_string(inner.left(), y, label, style);
+            let trunc_label: String = label.chars().take(inner.width as usize).collect();
+            buf.set_string(inner.left(), y, &trunc_label, style);
 
             click_targets.push(SidebarClickTarget {
                 rect: row_rect,
@@ -187,30 +202,31 @@ impl<'a> SidebarComponent<'a> {
                 inner.left(),
                 y,
                 "PLAYLISTS",
-                Style::default().fg(Theme::TEXT_MUTED).add_modifier(Modifier::BOLD),
+                Style::default().fg(self.theme.muted).add_modifier(Modifier::BOLD),
             );
             y += 1;
         }
 
-        let playlist_items = &items[5..items.len() - 1];
+        let playlist_items = &items[4..items.len() - 1];
         for (item, label, is_active) in playlist_items {
             if y >= inner.bottom() {
                 break;
             }
             let is_cursor = self.is_focused && self.selected_index == item_idx;
             let style = if *is_active {
-                Style::default().bg(Theme::BG_HIGHLIGHT).fg(Theme::OMARCHY_GREEN).add_modifier(Modifier::BOLD)
+                self.theme.selected_row()
             } else if is_cursor {
-                Style::default().bg(Theme::BG_CARD).fg(Theme::TEXT_PRIMARY).add_modifier(Modifier::BOLD)
+                Style::default().bg(self.theme.lighter_background).fg(self.theme.bright_foreground).add_modifier(Modifier::BOLD)
             } else {
-                Style::default().fg(Theme::TEXT_PRIMARY)
+                Style::default().fg(self.theme.foreground)
             };
 
             let row_rect = Rect::new(inner.left(), y, inner.width, 1);
             for x in row_rect.left()..row_rect.right() {
                 buf[(x, y)].set_style(style);
             }
-            buf.set_string(inner.left(), y, label, style);
+            let trunc_label: String = label.chars().take(inner.width as usize).collect();
+            buf.set_string(inner.left(), y, &trunc_label, style);
 
             click_targets.push(SidebarClickTarget {
                 rect: row_rect,
@@ -228,7 +244,7 @@ impl<'a> SidebarComponent<'a> {
                 inner.left(),
                 y,
                 "SYSTEM",
-                Style::default().fg(Theme::TEXT_MUTED).add_modifier(Modifier::BOLD),
+                Style::default().fg(self.theme.muted).add_modifier(Modifier::BOLD),
             );
             y += 1;
         }
@@ -237,18 +253,19 @@ impl<'a> SidebarComponent<'a> {
             if y < inner.bottom() {
                 let is_cursor = self.is_focused && self.selected_index == item_idx;
                 let style = if *is_active {
-                    Style::default().bg(Theme::BG_HIGHLIGHT).fg(Theme::OMARCHY_GREEN).add_modifier(Modifier::BOLD)
+                    self.theme.selected_row()
                 } else if is_cursor {
-                    Style::default().bg(Theme::BG_CARD).fg(Theme::TEXT_PRIMARY).add_modifier(Modifier::BOLD)
+                    Style::default().bg(self.theme.lighter_background).fg(self.theme.bright_foreground).add_modifier(Modifier::BOLD)
                 } else {
-                    Style::default().fg(Theme::TEXT_PRIMARY)
+                    Style::default().fg(self.theme.foreground)
                 };
 
                 let row_rect = Rect::new(inner.left(), y, inner.width, 1);
                 for x in row_rect.left()..row_rect.right() {
                     buf[(x, y)].set_style(style);
                 }
-                buf.set_string(inner.left(), y, label, style);
+                let trunc_label: String = label.chars().take(inner.width as usize).collect();
+                buf.set_string(inner.left(), y, &trunc_label, style);
 
                 click_targets.push(SidebarClickTarget {
                     rect: row_rect,

@@ -1,17 +1,19 @@
 use crate::audio::AudioEngine;
 use crate::config::{AppConfig, RepeatMode};
 use crate::library::playlist::PlaylistsManager;
-use crate::library::scanner::Scanner;
+use crate::library::scanner::{ScanUpdate, Scanner};
 use crate::library::track::Track;
 use crate::library::Library;
 use crate::ui::artwork::ArtworkCache;
 use crate::ui::components::header::HeaderClickTarget;
 use crate::ui::components::player_bar::{PlayerAction, PlayerClickTarget};
 use crate::ui::components::playlist_dialog::{PlaylistDialogClickTarget, PlaylistDialogMode};
-use crate::ui::components::sidebar::{SidebarClickTarget, SidebarItem, ViewMode};
+use crate::ui::components::sidebar::{SidebarClickTarget, SidebarComponent, SidebarItem, ViewMode};
 use crate::ui::mouse::{is_inside, relative_x_ratio};
-use crate::ui::views::albums_view::AlbumsViewClickTarget;
+use crate::ui::views::albums_view::{AlbumColumn, AlbumsViewClickTarget};
 use crate::ui::views::artists_view::{ArtistColumn, ArtistsViewClickTarget};
+use crate::ui::views::search_results_view::{SearchResultsClickTarget, SearchSection};
+use crate::ui::theme::OmarchyTheme;
 use crate::ui::views::file_browser::{FileBrowserItem, FileBrowserView};
 use crate::ui::views::now_playing::NowPlayingClickTarget;
 use crate::ui::views::playlists_view::PlaylistsViewClickTarget;
@@ -27,9 +29,11 @@ use std::time::Duration;
 pub enum FocusArea {
     Sidebar,
     MainView,
+    PlayerBar,
 }
 
 pub struct App {
+    pub theme: OmarchyTheme,
     pub config: AppConfig,
     pub library: Library,
     pub playlists_manager: PlaylistsManager,
@@ -51,10 +55,18 @@ pub struct App {
     // Global Search
     pub search_query: String,
     pub is_searching: bool,
+    pub previous_view_mode: ViewMode,
+    pub search_section: SearchSection,
+    pub search_artist_idx: usize,
+    pub search_album_idx: usize,
+    pub search_song_idx: usize,
+    pub search_artist_scroll: usize,
+    pub search_album_scroll: usize,
+    pub search_song_scroll: usize,
 
     // Modals
     pub show_help: bool,
-    pub playlist_dialog: Option<(PlaylistDialogMode, Track)>,
+    pub playlist_dialog: Option<(PlaylistDialogMode, Option<Track>)>,
 
     // Songs view state
     pub songs_selected_idx: usize,
@@ -65,14 +77,22 @@ pub struct App {
     pub artists_selected_idx: usize,
     pub artists_album_idx: usize,
     pub artists_song_idx: usize,
+    pub artists_scroll_offset: usize,
+    pub artists_album_scroll_offset: usize,
+    pub artists_song_scroll_offset: usize,
 
     // Albums view state
+    pub albums_col: AlbumColumn,
     pub albums_selected_idx: usize,
+    pub albums_song_idx: usize,
     pub albums_scroll_offset: usize,
+    pub albums_song_scroll_offset: usize,
 
     // Playlists view state
     pub active_playlist_id: String,
     pub playlists_track_idx: usize,
+    pub playlists_list_scroll_offset: usize,
+    pub playlists_scroll_offset: usize,
 
     // File Browser view state
     pub browser_current_dir: PathBuf,
@@ -86,8 +106,12 @@ pub struct App {
     pub is_entering_folder: bool,
     pub is_scanning: bool,
     pub scan_status: String,
+    pub scan_found_count: usize,
+    pub initial_loading: bool,
+    pub scan_receiver: Option<crossbeam_channel::Receiver<ScanUpdate>>,
 
     // Mouse Hit Targets recorded from previous render frame
+    pub last_main_area: Rect,
     pub last_header_targets: Option<HeaderClickTarget>,
     pub last_sidebar_targets: Vec<SidebarClickTarget>,
     pub last_player_targets: Vec<PlayerClickTarget>,
@@ -99,6 +123,7 @@ pub struct App {
     pub last_browser_targets: Vec<FileBrowserItemTarget>,
     pub last_settings_targets: Vec<SettingsClickTarget>,
     pub last_dialog_targets: Vec<PlaylistDialogClickTarget>,
+    pub last_search_targets: Vec<SearchResultsClickTarget>,
 }
 
 pub struct FileBrowserItemTarget {
@@ -109,15 +134,13 @@ pub struct FileBrowserItemTarget {
 impl App {
     pub fn new() -> anyhow::Result<Self> {
         let config = AppConfig::load();
-        let mut library = Library::load();
+        let library = Library::load();
         let playlists_manager = PlaylistsManager::load();
         let audio = AudioEngine::new()?;
         let artwork_cache = ArtworkCache::new();
 
-        // If library is empty but config has folders, perform initial scan
-        if library.tracks.is_empty() && !config.library_folders.is_empty() {
-            library.scan(&config.library_folders);
-        }
+        // If library is empty but config has folders, trigger initial scan asynchronously
+        let needs_initial_scan = library.tracks.is_empty() && !config.library_folders.is_empty();
 
         let initial_dir = config
             .library_folders
@@ -127,13 +150,16 @@ impl App {
 
         let browser_items = FileBrowserView::list_directory(&initial_dir);
 
-        let app = Self {
+        let theme = OmarchyTheme::load();
+
+        let mut app = Self {
+            theme,
             config,
             library,
             playlists_manager,
             audio,
             artwork_cache,
-            view_mode: ViewMode::Songs,
+            view_mode: ViewMode::Artists,
             focus: FocusArea::MainView,
             sidebar_index: 0,
             should_quit: false,
@@ -143,6 +169,14 @@ impl App {
             pre_mute_volume: 0.8,
             search_query: String::new(),
             is_searching: false,
+            previous_view_mode: ViewMode::Artists,
+            search_section: SearchSection::Songs,
+            search_artist_idx: 0,
+            search_album_idx: 0,
+            search_song_idx: 0,
+            search_artist_scroll: 0,
+            search_album_scroll: 0,
+            search_song_scroll: 0,
             show_help: false,
             playlist_dialog: None,
             songs_selected_idx: 0,
@@ -151,19 +185,31 @@ impl App {
             artists_selected_idx: 0,
             artists_album_idx: 0,
             artists_song_idx: 0,
+            artists_scroll_offset: 0,
+            artists_album_scroll_offset: 0,
+            artists_song_scroll_offset: 0,
+            albums_col: AlbumColumn::Albums,
             albums_selected_idx: 0,
+            albums_song_idx: 0,
             albums_scroll_offset: 0,
+            albums_song_scroll_offset: 0,
             active_playlist_id: "__favorites__".to_string(),
             playlists_track_idx: 0,
+            playlists_list_scroll_offset: 0,
+            playlists_scroll_offset: 0,
             browser_current_dir: initial_dir,
             browser_items,
             browser_selected_idx: 0,
             browser_scroll_offset: 0,
             settings_selected_folder: 0,
             new_folder_input: String::new(),
-            is_entering_folder: false,
+            is_entering_folder: bool::default(),
             is_scanning: false,
             scan_status: String::new(),
+            scan_found_count: 0,
+            initial_loading: needs_initial_scan,
+            scan_receiver: None,
+            last_main_area: Rect::default(),
             last_header_targets: None,
             last_sidebar_targets: Vec::new(),
             last_player_targets: Vec::new(),
@@ -175,18 +221,51 @@ impl App {
             last_browser_targets: Vec::new(),
             last_settings_targets: Vec::new(),
             last_dialog_targets: Vec::new(),
+            last_search_targets: Vec::new(),
         };
 
         app.audio.set_volume(app.config.volume);
+
+        if needs_initial_scan {
+            app.trigger_scan();
+        }
+
         Ok(app)
     }
 
     pub fn on_tick(&mut self) {
+        // Hot-reload theme if Omarchy desktop colors changed
+        self.theme.refresh_if_changed();
+
+        // Check for library scanner events
+        if let Some(rx) = &self.scan_receiver {
+            while let Ok(update) = rx.try_recv() {
+                match update {
+                    ScanUpdate::Progress { current_file, found_count } => {
+                        self.scan_found_count = found_count;
+                        self.scan_status = format!("Scanning: {}", current_file);
+                    }
+                    ScanUpdate::Completed { tracks } => {
+                        self.scan_found_count = tracks.len();
+                        self.library.tracks = tracks;
+                        self.library.scanned_at = Some(std::time::SystemTime::now());
+                        self.library.save().ok();
+                        self.is_scanning = false;
+                        self.initial_loading = false;
+                        self.scan_status = format!("Scan complete: {} audio tracks indexed", self.library.tracks.len());
+                    }
+                }
+            }
+        }
+
         // Check for audio events
         while let Some(event) = self.audio.try_recv_event() {
             match event {
                 crate::audio::PlayerEvent::TrackFinished => {
                     self.handle_track_finished();
+                }
+                crate::audio::PlayerEvent::TrackTransitioned(track) => {
+                    self.handle_track_transitioned(track);
                 }
                 crate::audio::PlayerEvent::Error(err) => {
                     self.scan_status = format!("Audio Error: {}", err);
@@ -195,9 +274,65 @@ impl App {
         }
     }
 
+    pub fn peek_next_track(&self) -> Option<Track> {
+        if self.playback_queue.is_empty() {
+            return None;
+        }
+        if self.config.shuffle {
+            if self.playback_queue.len() > 1 {
+                let other_indices: Vec<usize> = (0..self.playback_queue.len())
+                    .filter(|&i| i != self.queue_index)
+                    .collect();
+                let mut rng = rand::thread_rng();
+                other_indices.choose(&mut rng).and_then(|&idx| self.playback_queue.get(idx).cloned())
+            } else {
+                self.playback_queue.get(0).cloned()
+            }
+        } else {
+            match self.config.repeat_mode {
+                RepeatMode::Track => self.playback_queue.get(self.queue_index).cloned(),
+                RepeatMode::All => {
+                    let next_idx = (self.queue_index + 1) % self.playback_queue.len();
+                    self.playback_queue.get(next_idx).cloned()
+                }
+                RepeatMode::Off => {
+                    if self.queue_index + 1 < self.playback_queue.len() {
+                        self.playback_queue.get(self.queue_index + 1).cloned()
+                    } else {
+                        None
+                    }
+                }
+            }
+        }
+    }
+
+    pub fn update_next_track(&mut self) {
+        let next = self.peek_next_track();
+        self.audio.set_next_track(next);
+    }
+
+    pub fn handle_track_transitioned(&mut self, track: Track) {
+        self.playlists_manager.add_recently_played(&track.id);
+        self.audio.on_track_transitioned(&track);
+
+        // Find position of transitioned track in playback queue
+        if let Some(pos) = self.playback_queue.iter().position(|t| t.id == track.id) {
+            self.queue_index = pos;
+        }
+
+        // Keep table selection in sync if viewing Songs
+        if self.view_mode == ViewMode::Songs {
+            self.songs_selected_idx = self.queue_index;
+        }
+
+        // Start background preloading for subsequent track immediately
+        self.update_next_track();
+    }
+
     pub fn play_track_now(&mut self, track: Track) {
         self.playlists_manager.add_recently_played(&track.id);
         self.audio.play_track(track);
+        self.update_next_track();
     }
 
     pub fn play_queue_at(&mut self, queue: Vec<Track>, start_idx: usize) {
@@ -276,9 +411,7 @@ impl App {
     }
 
     pub fn toggle_favorite_current(&mut self) {
-        if let Some(track) = self.audio.current_track() {
-            self.playlists_manager.toggle_favorite(&track.id);
-        } else if let Some(track) = self.get_selected_track() {
+        if let Some(track) = self.get_selected_track().or_else(|| self.audio.current_track()) {
             self.playlists_manager.toggle_favorite(&track.id);
         }
     }
@@ -297,6 +430,12 @@ impl App {
                 let songs = self.library.tracks_by_artist_and_album(artist, album);
                 songs.get(self.artists_song_idx).copied().cloned()
             }
+            ViewMode::Albums => {
+                let albums = self.library.all_albums();
+                let album = albums.get(self.albums_selected_idx)?;
+                let songs = self.library.tracks_by_artist_and_album(&album.artist, &album.album);
+                songs.get(self.albums_song_idx).copied().cloned()
+            }
             ViewMode::NowPlaying => self.audio.current_track(),
             ViewMode::Playlists => {
                 let track_ids: &[String] = if self.active_playlist_id == "__favorites__" {
@@ -311,6 +450,10 @@ impl App {
                 let tracks = self.library.tracks_for_playlist(track_ids);
                 tracks.get(self.playlists_track_idx).copied().cloned()
             }
+            ViewMode::SearchResults => {
+                let songs = self.library.search_tracks(&self.search_query);
+                songs.get(self.search_song_idx).copied().cloned()
+            }
             _ => None,
         }
     }
@@ -319,7 +462,39 @@ impl App {
         if let Some(track) = self.get_selected_track().or_else(|| self.audio.current_track()) {
             self.playlist_dialog = Some((
                 PlaylistDialogMode::SelectPlaylist { selected_idx: 0 },
-                track,
+                Some(track),
+            ));
+        }
+    }
+
+    pub fn prompt_rename_playlist(&mut self, id: &str) {
+        if id == "__favorites__" || id == "__recent__" {
+            return;
+        }
+        if let Some(p) = self.playlists_manager.get_playlist(id) {
+            let name = p.name.clone();
+            self.playlist_dialog = Some((
+                PlaylistDialogMode::RenamePlaylist {
+                    playlist_id: id.to_string(),
+                    name_input: name,
+                },
+                None,
+            ));
+        }
+    }
+
+    pub fn prompt_delete_playlist(&mut self, id: &str) {
+        if id == "__favorites__" || id == "__recent__" {
+            return;
+        }
+        if let Some(p) = self.playlists_manager.get_playlist(id) {
+            let name = p.name.clone();
+            self.playlist_dialog = Some((
+                PlaylistDialogMode::ConfirmDelete {
+                    playlist_id: id.to_string(),
+                    playlist_name: name,
+                },
+                None,
             ));
         }
     }
@@ -356,7 +531,9 @@ impl App {
                         } else {
                             let p_idx = selected_idx - 1;
                             if let Some(p) = self.playlists_manager.playlists.get(p_idx).cloned() {
-                                self.playlists_manager.add_track(&p.id, &track.id);
+                                if let Some(ref tr) = track {
+                                    self.playlists_manager.add_track(&p.id, &tr.id);
+                                }
                             }
                             self.playlist_dialog = None;
                         }
@@ -381,12 +558,53 @@ impl App {
                         let trimmed = name_input.trim();
                         if !trimmed.is_empty() {
                             let new_id = self.playlists_manager.create_playlist(trimmed);
-                            self.playlists_manager.add_track(&new_id, &track.id);
+                            if let Some(ref tr) = track {
+                                self.playlists_manager.add_track(&new_id, &tr.id);
+                            }
                         }
                         self.playlist_dialog = None;
                     }
                     _ => {
                         self.playlist_dialog = Some((PlaylistDialogMode::CreateNew { name_input }, track));
+                    }
+                },
+                PlaylistDialogMode::RenamePlaylist { playlist_id, mut name_input } => match key.code {
+                    KeyCode::Esc => {
+                        self.playlist_dialog = None;
+                    }
+                    KeyCode::Char(c) => {
+                        name_input.push(c);
+                        self.playlist_dialog = Some((PlaylistDialogMode::RenamePlaylist { playlist_id, name_input }, track));
+                    }
+                    KeyCode::Backspace => {
+                        name_input.pop();
+                        self.playlist_dialog = Some((PlaylistDialogMode::RenamePlaylist { playlist_id, name_input }, track));
+                    }
+                    KeyCode::Enter => {
+                        let trimmed = name_input.trim();
+                        if !trimmed.is_empty() {
+                            self.playlists_manager.rename_playlist(&playlist_id, trimmed);
+                        }
+                        self.playlist_dialog = None;
+                    }
+                    _ => {
+                        self.playlist_dialog = Some((PlaylistDialogMode::RenamePlaylist { playlist_id, name_input }, track));
+                    }
+                },
+                PlaylistDialogMode::ConfirmDelete { playlist_id, playlist_name } => match key.code {
+                    KeyCode::Esc => {
+                        self.playlist_dialog = None;
+                    }
+                    KeyCode::Enter => {
+                        self.playlists_manager.delete_playlist(&playlist_id);
+                        if self.active_playlist_id == playlist_id {
+                            self.active_playlist_id = "__favorites__".to_string();
+                            self.playlists_track_idx = 0;
+                        }
+                        self.playlist_dialog = None;
+                    }
+                    _ => {
+                        self.playlist_dialog = Some((PlaylistDialogMode::ConfirmDelete { playlist_id, playlist_name }, track));
                     }
                 },
             }
@@ -395,27 +613,46 @@ impl App {
 
         // 3. Search Mode active
         if self.is_searching {
+            if key.modifiers.contains(KeyModifiers::CONTROL)
+                && (key.code == KeyCode::Char('c') || key.code == KeyCode::Char('q'))
+            {
+                self.should_quit = true;
+                return;
+            }
             match key.code {
                 KeyCode::Esc => {
                     self.is_searching = false;
-                }
-                KeyCode::Enter => {
-                    self.is_searching = false;
-                    // Play first search match
-                    let matches = self.library.search(&self.search_query);
-                    if let Some(t) = matches.first() {
-                        self.play_track_now((*t).clone());
+                    if self.search_query.is_empty() && self.view_mode == ViewMode::SearchResults {
+                        self.set_view(self.previous_view_mode);
                     }
+                }
+                KeyCode::Enter | KeyCode::Tab | KeyCode::BackTab => {
+                    self.is_searching = false;
+                    self.focus = FocusArea::MainView;
+                }
+                KeyCode::Down | KeyCode::Up => {
+                    self.is_searching = false;
+                    self.focus = FocusArea::MainView;
+                    self.handle_main_view_key(key);
                 }
                 KeyCode::Backspace => {
                     self.search_query.pop();
-                    self.songs_selected_idx = 0;
-                    self.songs_scroll_offset = 0;
+                    self.search_artist_idx = 0;
+                    self.search_album_idx = 0;
+                    self.search_song_idx = 0;
+                    self.search_artist_scroll = 0;
+                    self.search_album_scroll = 0;
+                    self.search_song_scroll = 0;
                 }
                 KeyCode::Char(c) => {
                     self.search_query.push(c);
-                    self.songs_selected_idx = 0;
-                    self.songs_scroll_offset = 0;
+                    self.search_artist_idx = 0;
+                    self.search_album_idx = 0;
+                    self.search_song_idx = 0;
+                    self.search_artist_scroll = 0;
+                    self.search_album_scroll = 0;
+                    self.search_song_scroll = 0;
+                    self.view_mode = ViewMode::SearchResults;
                 }
                 _ => {}
             }
@@ -463,31 +700,37 @@ impl App {
                 return;
             }
             KeyCode::Char('/') => {
+                if self.view_mode != ViewMode::SearchResults {
+                    self.previous_view_mode = self.view_mode;
+                }
                 self.is_searching = true;
+                self.view_mode = ViewMode::SearchResults;
+                self.focus = FocusArea::MainView;
                 return;
             }
             KeyCode::Tab => {
                 self.focus = match self.focus {
                     FocusArea::Sidebar => FocusArea::MainView,
-                    FocusArea::MainView => FocusArea::Sidebar,
+                    FocusArea::MainView => FocusArea::PlayerBar,
+                    FocusArea::PlayerBar => FocusArea::Sidebar,
                 };
                 return;
             }
             KeyCode::BackTab => {
                 self.focus = match self.focus {
-                    FocusArea::Sidebar => FocusArea::MainView,
+                    FocusArea::Sidebar => FocusArea::PlayerBar,
                     FocusArea::MainView => FocusArea::Sidebar,
+                    FocusArea::PlayerBar => FocusArea::MainView,
                 };
                 return;
             }
-            // Number keys 1..7 switch views directly
-            KeyCode::Char('1') => { self.set_view(ViewMode::Songs); return; }
-            KeyCode::Char('2') => { self.set_view(ViewMode::Artists); return; }
-            KeyCode::Char('3') => { self.set_view(ViewMode::Albums); return; }
+            // Number keys 1..6 switch views directly
+            KeyCode::Char('1') => { self.set_view(ViewMode::Artists); return; }
+            KeyCode::Char('2') => { self.set_view(ViewMode::Albums); return; }
+            KeyCode::Char('3') => { self.set_view(ViewMode::Songs); return; }
             KeyCode::Char('4') => { self.set_view(ViewMode::NowPlaying); return; }
             KeyCode::Char('5') => { self.set_view(ViewMode::Playlists); return; }
-            KeyCode::Char('6') => { self.set_view(ViewMode::FileBrowser); return; }
-            KeyCode::Char('7') => { self.set_view(ViewMode::Settings); return; }
+            KeyCode::Char('6') => { self.set_view(ViewMode::Settings); return; }
 
             // Transport controls
             KeyCode::Char(' ') => {
@@ -507,11 +750,19 @@ impl App {
                 return;
             }
             KeyCode::Left if key.modifiers.contains(KeyModifiers::SHIFT) => {
-                self.audio.seek_relative(-30);
+                if self.focus == FocusArea::PlayerBar {
+                    self.prev_track();
+                } else {
+                    self.audio.seek_relative(-30);
+                }
                 return;
             }
             KeyCode::Right if key.modifiers.contains(KeyModifiers::SHIFT) => {
-                self.audio.seek_relative(30);
+                if self.focus == FocusArea::PlayerBar {
+                    self.next_track();
+                } else {
+                    self.audio.seek_relative(30);
+                }
                 return;
             }
             KeyCode::Char('[') => {
@@ -534,14 +785,44 @@ impl App {
                 self.toggle_mute();
                 return;
             }
+            KeyCode::F(2) => {
+                if self.focus == FocusArea::Sidebar {
+                    self.handle_sidebar_key(key);
+                    return;
+                }
+                if self.view_mode == ViewMode::Playlists && self.active_playlist_id != "__favorites__" && self.active_playlist_id != "__recent__" {
+                    self.prompt_rename_playlist(&self.active_playlist_id.clone());
+                    return;
+                }
+            }
             KeyCode::Char('r') => {
+                if self.focus == FocusArea::Sidebar {
+                    self.handle_sidebar_key(key);
+                    return;
+                }
+                if self.view_mode == ViewMode::Playlists && self.active_playlist_id != "__favorites__" && self.active_playlist_id != "__recent__" {
+                    self.prompt_rename_playlist(&self.active_playlist_id.clone());
+                    return;
+                }
                 self.config.repeat_mode = self.config.repeat_mode.next();
                 self.config.save().ok();
+                self.update_next_track();
                 return;
+            }
+            KeyCode::Char('D') => {
+                if self.focus == FocusArea::Sidebar {
+                    self.handle_sidebar_key(key);
+                    return;
+                }
+                if self.view_mode == ViewMode::Playlists && self.active_playlist_id != "__favorites__" && self.active_playlist_id != "__recent__" {
+                    self.prompt_delete_playlist(&self.active_playlist_id.clone());
+                    return;
+                }
             }
             KeyCode::Char('z') => {
                 self.config.shuffle = !self.config.shuffle;
                 self.config.save().ok();
+                self.update_next_track();
                 return;
             }
             KeyCode::Char('a') => {
@@ -563,75 +844,159 @@ impl App {
             FocusArea::MainView => {
                 self.handle_main_view_key(key);
             }
+            FocusArea::PlayerBar => {
+                self.handle_player_bar_key(key);
+            }
+        }
+    }
+
+    fn handle_player_bar_key(&mut self, key: KeyEvent) {
+        match key.code {
+            KeyCode::Left | KeyCode::Char('h') => {
+                self.prev_track();
+            }
+            KeyCode::Right | KeyCode::Char('l') => {
+                self.next_track();
+            }
+            KeyCode::Up | KeyCode::Char('k') => {
+                self.adjust_volume(0.05);
+            }
+            KeyCode::Down | KeyCode::Char('j') => {
+                self.adjust_volume(-0.05);
+            }
+            KeyCode::Enter => {
+                self.audio.toggle_pause();
+            }
+            _ => {}
         }
     }
 
     fn handle_sidebar_key(&mut self, key: KeyEvent) {
+        let max_items = SidebarComponent {
+            current_view: self.view_mode,
+            current_playlist_id: Some(&self.active_playlist_id),
+            playlists_manager: &self.playlists_manager,
+            is_focused: false,
+            selected_index: 0,
+            theme: &self.theme,
+        }.build_items().len();
+
         match key.code {
             KeyCode::Up | KeyCode::Char('k') => {
                 self.sidebar_index = self.sidebar_index.saturating_sub(1);
             }
             KeyCode::Down | KeyCode::Char('j') => {
-                let max_items = 8 + self.playlists_manager.playlists.len();
                 self.sidebar_index = (self.sidebar_index + 1).min(max_items.saturating_sub(1));
             }
             KeyCode::Enter => {
                 // Activate selected sidebar item
                 self.activate_sidebar_index(self.sidebar_index);
             }
+            KeyCode::Char('r') | KeyCode::F(2) => {
+                let items = SidebarComponent {
+                    current_view: self.view_mode,
+                    current_playlist_id: Some(&self.active_playlist_id),
+                    playlists_manager: &self.playlists_manager,
+                    is_focused: false,
+                    selected_index: 0,
+                    theme: &self.theme,
+                }.build_items();
+                if let Some((SidebarItem::CustomPlaylist(id), _, _)) = items.get(self.sidebar_index) {
+                    self.prompt_rename_playlist(&id.clone());
+                }
+            }
+            KeyCode::Char('D') | KeyCode::Delete => {
+                let items = SidebarComponent {
+                    current_view: self.view_mode,
+                    current_playlist_id: Some(&self.active_playlist_id),
+                    playlists_manager: &self.playlists_manager,
+                    is_focused: false,
+                    selected_index: 0,
+                    theme: &self.theme,
+                }.build_items();
+                if let Some((SidebarItem::CustomPlaylist(id), _, _)) = items.get(self.sidebar_index) {
+                    self.prompt_delete_playlist(&id.clone());
+                }
+            }
             _ => {}
         }
     }
 
     fn activate_sidebar_index(&mut self, index: usize) {
-        // 0: Songs, 1: Artists, 2: Albums, 3: NowPlaying, 4: FileBrowser
-        // 5: Favorites, 6: RecentlyPlayed, 7..7+N: Playlists, N+8: NewPlaylist, N+9: Settings
-        match index {
-            0 => self.set_view(ViewMode::Songs),
-            1 => self.set_view(ViewMode::Artists),
-            2 => self.set_view(ViewMode::Albums),
-            3 => self.set_view(ViewMode::NowPlaying),
-            4 => self.set_view(ViewMode::FileBrowser),
-            5 => {
-                self.active_playlist_id = "__favorites__".to_string();
-                self.set_view(ViewMode::Playlists);
-            }
-            6 => {
-                self.active_playlist_id = "__recent__".to_string();
-                self.set_view(ViewMode::Playlists);
-            }
-            idx => {
-                let playlist_offset = idx.saturating_sub(7);
-                if playlist_offset < self.playlists_manager.playlists.len() {
-                    let id = self.playlists_manager.playlists[playlist_offset].id.clone();
-                    self.active_playlist_id = id;
+        let items = SidebarComponent {
+            current_view: self.view_mode,
+            current_playlist_id: Some(&self.active_playlist_id),
+            playlists_manager: &self.playlists_manager,
+            is_focused: false,
+            selected_index: 0,
+            theme: &self.theme,
+        }.build_items();
+
+        if let Some((item, _, _)) = items.get(index) {
+            match item {
+                SidebarItem::View(vm) => self.set_view(*vm),
+                SidebarItem::Favorites => {
+                    self.active_playlist_id = "__favorites__".to_string();
                     self.set_view(ViewMode::Playlists);
-                } else if playlist_offset == self.playlists_manager.playlists.len() {
-                    // New playlist dialog
-                    if let Some(track) = self.get_selected_track().or_else(|| self.audio.current_track()) {
-                        self.playlist_dialog = Some((PlaylistDialogMode::CreateNew { name_input: String::new() }, track));
-                    }
-                } else {
-                    self.set_view(ViewMode::Settings);
+                }
+                SidebarItem::RecentlyPlayed => {
+                    self.active_playlist_id = "__recent__".to_string();
+                    self.set_view(ViewMode::Playlists);
+                }
+                SidebarItem::CustomPlaylist(id) => {
+                    self.active_playlist_id = id.clone();
+                    self.set_view(ViewMode::Playlists);
+                }
+                SidebarItem::NewPlaylist => {
+                    let track = self.get_selected_track().or_else(|| self.audio.current_track());
+                    self.playlist_dialog = Some((PlaylistDialogMode::CreateNew { name_input: String::new() }, track));
                 }
             }
         }
         self.focus = FocusArea::MainView;
     }
 
+    fn visible_main_rows(&self, header_lines: u16) -> usize {
+        let h = if self.last_main_area.height > 2 + header_lines {
+            self.last_main_area.height - 2 - header_lines
+        } else {
+            15
+        };
+        (h as usize).max(1)
+    }
+
+    fn sync_scroll(selected: usize, scroll: &mut usize, visible_rows: usize) {
+        if selected < *scroll {
+            *scroll = selected;
+        } else if visible_rows > 0 && selected >= *scroll + visible_rows {
+            *scroll = selected + 1 - visible_rows;
+        }
+    }
+
+    fn scroll_pane(is_up: bool, scroll: &mut usize, total_items: usize, visible_rows: usize) {
+        let max_scroll = total_items.saturating_sub(visible_rows);
+        if is_up {
+            *scroll = (*scroll).min(max_scroll).saturating_sub(1);
+        } else {
+            *scroll = ((*scroll) + 1).min(max_scroll);
+        }
+    }
+
     fn handle_main_view_key(&mut self, key: KeyEvent) {
+        let vis_0 = self.visible_main_rows(0);
+        let vis_2 = self.visible_main_rows(2);
+
         match self.view_mode {
             ViewMode::Songs => match key.code {
                 KeyCode::Up | KeyCode::Char('k') => {
                     self.songs_selected_idx = self.songs_selected_idx.saturating_sub(1);
-                    if self.songs_selected_idx < self.songs_scroll_offset {
-                        self.songs_scroll_offset = self.songs_selected_idx;
-                    }
+                    Self::sync_scroll(self.songs_selected_idx, &mut self.songs_scroll_offset, vis_2);
                 }
                 KeyCode::Down | KeyCode::Char('j') => {
                     let tracks = self.library.search(&self.search_query);
                     if !tracks.is_empty() {
                         self.songs_selected_idx = (self.songs_selected_idx + 1).min(tracks.len() - 1);
+                        Self::sync_scroll(self.songs_selected_idx, &mut self.songs_scroll_offset, vis_2);
                     }
                 }
                 KeyCode::Left => {
@@ -666,13 +1031,19 @@ impl App {
                         self.artists_selected_idx = self.artists_selected_idx.saturating_sub(1);
                         self.artists_album_idx = 0;
                         self.artists_song_idx = 0;
+                        self.artists_album_scroll_offset = 0;
+                        self.artists_song_scroll_offset = 0;
+                        Self::sync_scroll(self.artists_selected_idx, &mut self.artists_scroll_offset, vis_0);
                     }
                     ArtistColumn::Albums => {
                         self.artists_album_idx = self.artists_album_idx.saturating_sub(1);
                         self.artists_song_idx = 0;
+                        self.artists_song_scroll_offset = 0;
+                        Self::sync_scroll(self.artists_album_idx, &mut self.artists_album_scroll_offset, vis_0);
                     }
                     ArtistColumn::Songs => {
                         self.artists_song_idx = self.artists_song_idx.saturating_sub(1);
+                        Self::sync_scroll(self.artists_song_idx, &mut self.artists_song_scroll_offset, vis_0);
                     }
                 },
                 KeyCode::Down | KeyCode::Char('j') => match self.artists_col {
@@ -682,6 +1053,9 @@ impl App {
                             self.artists_selected_idx = (self.artists_selected_idx + 1).min(artists.len() - 1);
                             self.artists_album_idx = 0;
                             self.artists_song_idx = 0;
+                            self.artists_album_scroll_offset = 0;
+                            self.artists_song_scroll_offset = 0;
+                            Self::sync_scroll(self.artists_selected_idx, &mut self.artists_scroll_offset, vis_0);
                         }
                     }
                     ArtistColumn::Albums => {
@@ -691,6 +1065,8 @@ impl App {
                             if !albums.is_empty() {
                                 self.artists_album_idx = (self.artists_album_idx + 1).min(albums.len() - 1);
                                 self.artists_song_idx = 0;
+                                self.artists_song_scroll_offset = 0;
+                                Self::sync_scroll(self.artists_album_idx, &mut self.artists_album_scroll_offset, vis_0);
                             }
                         }
                     }
@@ -702,6 +1078,7 @@ impl App {
                                 let songs = self.library.tracks_by_artist_and_album(art, alb);
                                 if !songs.is_empty() {
                                     self.artists_song_idx = (self.artists_song_idx + 1).min(songs.len() - 1);
+                                    Self::sync_scroll(self.artists_song_idx, &mut self.artists_song_scroll_offset, vis_0);
                                 }
                             }
                         }
@@ -725,15 +1102,51 @@ impl App {
                 _ => {}
             },
             ViewMode::Albums => match key.code {
-                KeyCode::Up | KeyCode::Char('k') => {
-                    self.albums_selected_idx = self.albums_selected_idx.saturating_sub(1);
+                KeyCode::Tab | KeyCode::BackTab => {
+                    self.albums_col = match self.albums_col {
+                        AlbumColumn::Albums => AlbumColumn::Songs,
+                        AlbumColumn::Songs => AlbumColumn::Albums,
+                    };
                 }
-                KeyCode::Down | KeyCode::Char('j') => {
-                    let albums = self.library.all_albums();
-                    if !albums.is_empty() {
-                        self.albums_selected_idx = (self.albums_selected_idx + 1).min(albums.len() - 1);
+                KeyCode::Left | KeyCode::Char('h') => {
+                    self.albums_col = AlbumColumn::Albums;
+                }
+                KeyCode::Right | KeyCode::Char('l') => {
+                    self.albums_col = AlbumColumn::Songs;
+                }
+                KeyCode::Up | KeyCode::Char('k') => match self.albums_col {
+                    AlbumColumn::Albums => {
+                        self.albums_selected_idx = self.albums_selected_idx.saturating_sub(1);
+                        self.albums_song_idx = 0;
+                        self.albums_song_scroll_offset = 0;
+                        Self::sync_scroll(self.albums_selected_idx, &mut self.albums_scroll_offset, vis_0);
                     }
-                }
+                    AlbumColumn::Songs => {
+                        self.albums_song_idx = self.albums_song_idx.saturating_sub(1);
+                        Self::sync_scroll(self.albums_song_idx, &mut self.albums_song_scroll_offset, vis_0);
+                    }
+                },
+                KeyCode::Down | KeyCode::Char('j') => match self.albums_col {
+                    AlbumColumn::Albums => {
+                        let albums = self.library.all_albums();
+                        if !albums.is_empty() {
+                            self.albums_selected_idx = (self.albums_selected_idx + 1).min(albums.len() - 1);
+                            self.albums_song_idx = 0;
+                            self.albums_song_scroll_offset = 0;
+                            Self::sync_scroll(self.albums_selected_idx, &mut self.albums_scroll_offset, vis_0);
+                        }
+                    }
+                    AlbumColumn::Songs => {
+                        let albums = self.library.all_albums();
+                        if let Some(alb) = albums.get(self.albums_selected_idx) {
+                            let songs = self.library.tracks_by_artist_and_album(&alb.artist, &alb.album);
+                            if !songs.is_empty() {
+                                self.albums_song_idx = (self.albums_song_idx + 1).min(songs.len() - 1);
+                                Self::sync_scroll(self.albums_song_idx, &mut self.albums_song_scroll_offset, vis_0);
+                            }
+                        }
+                    }
+                },
                 KeyCode::Enter => {
                     let albums = self.library.all_albums();
                     if let Some(alb) = albums.get(self.albums_selected_idx) {
@@ -743,7 +1156,11 @@ impl App {
                             .into_iter()
                             .cloned()
                             .collect();
-                        self.play_queue_at(songs, 0);
+                        let start_idx = match self.albums_col {
+                            AlbumColumn::Albums => 0,
+                            AlbumColumn::Songs => self.albums_song_idx,
+                        };
+                        self.play_queue_at(songs, start_idx);
                     }
                 }
                 _ => {}
@@ -760,6 +1177,7 @@ impl App {
             ViewMode::Playlists => match key.code {
                 KeyCode::Up | KeyCode::Char('k') => {
                     self.playlists_track_idx = self.playlists_track_idx.saturating_sub(1);
+                    Self::sync_scroll(self.playlists_track_idx, &mut self.playlists_scroll_offset, vis_2);
                 }
                 KeyCode::Down | KeyCode::Char('j') => {
                     let track_ids: &[String] = if self.active_playlist_id == "__favorites__" {
@@ -773,6 +1191,7 @@ impl App {
                     };
                     if !track_ids.is_empty() {
                         self.playlists_track_idx = (self.playlists_track_idx + 1).min(track_ids.len() - 1);
+                        Self::sync_scroll(self.playlists_track_idx, &mut self.playlists_scroll_offset, vis_2);
                     }
                 }
                 KeyCode::Enter => {
@@ -793,6 +1212,16 @@ impl App {
                         .collect();
                     self.play_queue_at(songs, self.playlists_track_idx);
                 }
+                KeyCode::Char('r') | KeyCode::F(2) => {
+                    if self.active_playlist_id != "__favorites__" && self.active_playlist_id != "__recent__" {
+                        self.prompt_rename_playlist(&self.active_playlist_id.clone());
+                    }
+                }
+                KeyCode::Char('D') => {
+                    if self.active_playlist_id != "__favorites__" && self.active_playlist_id != "__recent__" {
+                        self.prompt_delete_playlist(&self.active_playlist_id.clone());
+                    }
+                }
                 KeyCode::Delete | KeyCode::Char('d') => {
                     if self.active_playlist_id != "__favorites__" && self.active_playlist_id != "__recent__" {
                         self.playlists_manager
@@ -804,10 +1233,12 @@ impl App {
             ViewMode::FileBrowser => match key.code {
                 KeyCode::Up | KeyCode::Char('k') => {
                     self.browser_selected_idx = self.browser_selected_idx.saturating_sub(1);
+                    Self::sync_scroll(self.browser_selected_idx, &mut self.browser_scroll_offset, vis_0);
                 }
                 KeyCode::Down | KeyCode::Char('j') => {
                     if !self.browser_items.is_empty() {
                         self.browser_selected_idx = (self.browser_selected_idx + 1).min(self.browser_items.len() - 1);
+                        Self::sync_scroll(self.browser_selected_idx, &mut self.browser_scroll_offset, vis_0);
                     }
                 }
                 KeyCode::Enter => {
@@ -843,6 +1274,87 @@ impl App {
                 }
                 _ => {}
             },
+            ViewMode::SearchResults => match key.code {
+                KeyCode::Tab | KeyCode::Right | KeyCode::Char('l') => {
+                    self.search_section = self.search_section.next();
+                }
+                KeyCode::BackTab | KeyCode::Left | KeyCode::Char('h') => {
+                    self.search_section = self.search_section.prev();
+                }
+                KeyCode::Up | KeyCode::Char('k') => {
+                    match self.search_section {
+                        SearchSection::Artists => {
+                            self.search_artist_idx = self.search_artist_idx.saturating_sub(1);
+                            Self::sync_scroll(self.search_artist_idx, &mut self.search_artist_scroll, vis_0);
+                        }
+                        SearchSection::Albums => {
+                            self.search_album_idx = self.search_album_idx.saturating_sub(1);
+                            Self::sync_scroll(self.search_album_idx, &mut self.search_album_scroll, vis_0);
+                        }
+                        SearchSection::Songs => {
+                            self.search_song_idx = self.search_song_idx.saturating_sub(1);
+                            Self::sync_scroll(self.search_song_idx, &mut self.search_song_scroll, vis_0);
+                        }
+                    }
+                }
+                KeyCode::Down | KeyCode::Char('j') => {
+                    match self.search_section {
+                        SearchSection::Artists => {
+                            let count = self.library.search_artists(&self.search_query).len();
+                            if count > 0 {
+                                self.search_artist_idx = (self.search_artist_idx + 1).min(count - 1);
+                                Self::sync_scroll(self.search_artist_idx, &mut self.search_artist_scroll, vis_0);
+                            }
+                        }
+                        SearchSection::Albums => {
+                            let count = self.library.search_albums(&self.search_query).len();
+                            if count > 0 {
+                                self.search_album_idx = (self.search_album_idx + 1).min(count - 1);
+                                Self::sync_scroll(self.search_album_idx, &mut self.search_album_scroll, vis_0);
+                            }
+                        }
+                        SearchSection::Songs => {
+                            let count = self.library.search_tracks(&self.search_query).len();
+                            if count > 0 {
+                                self.search_song_idx = (self.search_song_idx + 1).min(count - 1);
+                                Self::sync_scroll(self.search_song_idx, &mut self.search_song_scroll, vis_0);
+                            }
+                        }
+                    }
+                }
+                KeyCode::Enter => {
+                    match self.search_section {
+                        SearchSection::Artists => {
+                            let artists = self.library.search_artists(&self.search_query);
+                            if let Some(art) = artists.get(self.search_artist_idx) {
+                                let songs: Vec<Track> = self.library.tracks_by_artist(&art.name).into_iter().cloned().collect();
+                                self.play_queue_at(songs, 0);
+                            }
+                        }
+                        SearchSection::Albums => {
+                            let albums = self.library.search_albums(&self.search_query);
+                            if let Some(alb) = albums.get(self.search_album_idx) {
+                                let songs: Vec<Track> = self.library.tracks_by_artist_and_album(&alb.artist, &alb.album).into_iter().cloned().collect();
+                                self.play_queue_at(songs, 0);
+                            }
+                        }
+                        SearchSection::Songs => {
+                            let songs: Vec<Track> = self.library.search_tracks(&self.search_query).into_iter().cloned().collect();
+                            if self.search_song_idx < songs.len() {
+                                self.play_queue_at(songs, self.search_song_idx);
+                            }
+                        }
+                    }
+                }
+                KeyCode::Char('/') => {
+                    self.is_searching = true;
+                }
+                KeyCode::Esc => {
+                    self.search_query.clear();
+                    self.set_view(self.previous_view_mode);
+                }
+                _ => {}
+            },
         }
     }
 
@@ -867,6 +1379,18 @@ impl App {
     }
 
     fn handle_mouse_click(&mut self, x: u16, y: u16) {
+        // Uncapture search mode whenever the user clicks outside the search box
+        if self.is_searching {
+            let clicked_search = self
+                .last_header_targets
+                .as_ref()
+                .map(|hdr| is_inside(hdr.search_rect, x, y))
+                .unwrap_or(false);
+            if !clicked_search {
+                self.is_searching = false;
+            }
+        }
+
         // 1. Help modal click to close
         if self.show_help {
             self.show_help = false;
@@ -881,28 +1405,59 @@ impl App {
                     return;
                 }
                 if let Some((mode, track)) = self.playlist_dialog.take() {
-                    if t.is_create_button {
-                        match mode {
-                            PlaylistDialogMode::SelectPlaylist { .. } => {
+                    match mode {
+                        PlaylistDialogMode::SelectPlaylist { .. } => {
+                            if t.is_confirm_button || t.index == Some(0) {
                                 self.playlist_dialog = Some((PlaylistDialogMode::CreateNew { name_input: String::new() }, track));
-                            }
-                            PlaylistDialogMode::CreateNew { name_input } => {
-                                let trimmed = name_input.trim();
-                                if !trimmed.is_empty() {
-                                    let new_id = self.playlists_manager.create_playlist(trimmed);
-                                    self.playlists_manager.add_track(&new_id, &track.id);
+                            } else if let Some(idx) = t.index {
+                                if idx > 0 {
+                                    let p_idx = idx - 1;
+                                    if let Some(p) = self.playlists_manager.playlists.get(p_idx).cloned() {
+                                        if let Some(ref tr) = track {
+                                            self.playlists_manager.add_track(&p.id, &tr.id);
+                                        }
+                                    }
                                 }
                                 self.playlist_dialog = None;
                             }
                         }
-                    } else if let Some(idx) = t.index {
-                        if idx > 0 {
-                            let p_idx = idx - 1;
-                            if let Some(p) = self.playlists_manager.playlists.get(p_idx).cloned() {
-                                self.playlists_manager.add_track(&p.id, &track.id);
+                        PlaylistDialogMode::CreateNew { name_input } => {
+                            if t.is_confirm_button {
+                                let trimmed = name_input.trim();
+                                if !trimmed.is_empty() {
+                                    let new_id = self.playlists_manager.create_playlist(trimmed);
+                                    if let Some(ref tr) = track {
+                                        self.playlists_manager.add_track(&new_id, &tr.id);
+                                    }
+                                }
+                                self.playlist_dialog = None;
+                            } else {
+                                self.playlist_dialog = Some((PlaylistDialogMode::CreateNew { name_input }, track));
                             }
                         }
-                        self.playlist_dialog = None;
+                        PlaylistDialogMode::RenamePlaylist { playlist_id, name_input } => {
+                            if t.is_confirm_button {
+                                let trimmed = name_input.trim();
+                                if !trimmed.is_empty() {
+                                    self.playlists_manager.rename_playlist(&playlist_id, trimmed);
+                                }
+                                self.playlist_dialog = None;
+                            } else {
+                                self.playlist_dialog = Some((PlaylistDialogMode::RenamePlaylist { playlist_id, name_input }, track));
+                            }
+                        }
+                        PlaylistDialogMode::ConfirmDelete { playlist_id, playlist_name } => {
+                            if t.is_confirm_button {
+                                self.playlists_manager.delete_playlist(&playlist_id);
+                                if self.active_playlist_id == playlist_id {
+                                    self.active_playlist_id = "__favorites__".to_string();
+                                    self.playlists_track_idx = 0;
+                                }
+                                self.playlist_dialog = None;
+                            } else {
+                                self.playlist_dialog = Some((PlaylistDialogMode::ConfirmDelete { playlist_id, playlist_name }, track));
+                            }
+                        }
                     }
                 }
                 return;
@@ -916,7 +1471,12 @@ impl App {
                 return;
             }
             if is_inside(hdr.search_rect, x, y) {
+                if self.view_mode != ViewMode::SearchResults {
+                    self.previous_view_mode = self.view_mode;
+                }
                 self.is_searching = true;
+                self.view_mode = ViewMode::SearchResults;
+                self.focus = FocusArea::MainView;
                 return;
             }
         }
@@ -924,6 +1484,7 @@ impl App {
         // 4. Player bar controls click
         for t in &self.last_player_targets {
             if is_inside(t.rect, x, y) {
+                self.focus = FocusArea::PlayerBar;
                 match t.action {
                     PlayerAction::Previous => self.prev_track(),
                     PlayerAction::TogglePlayPause => self.audio.toggle_pause(),
@@ -932,10 +1493,12 @@ impl App {
                     PlayerAction::ToggleRepeat => {
                         self.config.repeat_mode = self.config.repeat_mode.next();
                         self.config.save().ok();
+                        self.update_next_track();
                     }
                     PlayerAction::ToggleShuffle => {
                         self.config.shuffle = !self.config.shuffle;
                         self.config.save().ok();
+                        self.update_next_track();
                     }
                     PlayerAction::ToggleMute => self.toggle_mute(),
                     PlayerAction::Seek(_) => {
@@ -947,6 +1510,9 @@ impl App {
                     PlayerAction::SetVolume(_) => {
                         let ratio = relative_x_ratio(t.rect, x);
                         self.set_volume(ratio);
+                    }
+                    PlayerAction::OpenNowPlaying => {
+                        self.set_view(ViewMode::NowPlaying);
                     }
                 }
                 return;
@@ -971,12 +1537,11 @@ impl App {
                         self.set_view(ViewMode::Playlists);
                     }
                     SidebarItem::NewPlaylist => {
-                        if let Some(track) = self.get_selected_track().or_else(|| self.audio.current_track()) {
-                            self.playlist_dialog = Some((PlaylistDialogMode::CreateNew { name_input: String::new() }, track));
-                        }
+                        let track = self.get_selected_track().or_else(|| self.audio.current_track());
+                        self.playlist_dialog = Some((PlaylistDialogMode::CreateNew { name_input: String::new() }, track));
                     }
                 }
-                self.focus = FocusArea::Sidebar;
+                self.focus = FocusArea::MainView;
                 return;
             }
         }
@@ -1001,32 +1566,39 @@ impl App {
             ViewMode::Artists => {
                 for t in &self.last_artists_targets {
                     if is_inside(t.rect, x, y) {
+                        let prev_col = self.artists_col;
                         self.artists_col = t.column;
                         match t.column {
                             ArtistColumn::Artists => {
                                 self.artists_selected_idx = t.item_index;
                                 self.artists_album_idx = 0;
                                 self.artists_song_idx = 0;
+                                self.artists_album_scroll_offset = 0;
+                                self.artists_song_scroll_offset = 0;
                             }
                             ArtistColumn::Albums => {
                                 self.artists_album_idx = t.item_index;
                                 self.artists_song_idx = 0;
+                                self.artists_song_scroll_offset = 0;
                             }
                             ArtistColumn::Songs => {
-                                self.artists_song_idx = t.item_index;
-                                // Play clicked song!
-                                let artists = self.library.artists();
-                                if let Some(art) = artists.get(self.artists_selected_idx) {
-                                    let albums = self.library.albums_by_artist(art);
-                                    if let Some(alb) = albums.get(self.artists_album_idx) {
-                                        let songs: Vec<Track> = self
-                                            .library
-                                            .tracks_by_artist_and_album(art, alb)
-                                            .into_iter()
-                                            .cloned()
-                                            .collect();
-                                        self.play_queue_at(songs, t.item_index);
+                                if prev_col == ArtistColumn::Songs && self.artists_song_idx == t.item_index {
+                                    // Play clicked song on double-click / re-click!
+                                    let artists = self.library.artists();
+                                    if let Some(art) = artists.get(self.artists_selected_idx) {
+                                        let albums = self.library.albums_by_artist(art);
+                                        if let Some(alb) = albums.get(self.artists_album_idx) {
+                                            let songs: Vec<Track> = self
+                                                .library
+                                                .tracks_by_artist_and_album(art, alb)
+                                                .into_iter()
+                                                .cloned()
+                                                .collect();
+                                            self.play_queue_at(songs, t.item_index);
+                                        }
                                     }
+                                } else {
+                                    self.artists_song_idx = t.item_index;
                                 }
                             }
                         }
@@ -1038,19 +1610,44 @@ impl App {
             ViewMode::Albums => {
                 for t in &self.last_albums_targets {
                     if is_inside(t.rect, x, y) {
-                        if self.albums_selected_idx == t.album_index {
-                            let albums = self.library.all_albums();
-                            if let Some(alb) = albums.get(t.album_index) {
-                                let songs: Vec<Track> = self
-                                    .library
-                                    .tracks_by_artist_and_album(&alb.artist, &alb.album)
-                                    .into_iter()
-                                    .cloned()
-                                    .collect();
-                                self.play_queue_at(songs, 0);
+                        let prev_col = self.albums_col;
+                        self.albums_col = t.column;
+                        match t.column {
+                            AlbumColumn::Albums => {
+                                if prev_col == AlbumColumn::Albums && self.albums_selected_idx == t.item_index {
+                                    // Play album on double-click
+                                    let albums = self.library.all_albums();
+                                    if let Some(alb) = albums.get(t.item_index) {
+                                        let songs: Vec<Track> = self
+                                            .library
+                                            .tracks_by_artist_and_album(&alb.artist, &alb.album)
+                                            .into_iter()
+                                            .cloned()
+                                            .collect();
+                                        self.play_queue_at(songs, 0);
+                                    }
+                                } else {
+                                    self.albums_selected_idx = t.item_index;
+                                    self.albums_song_idx = 0;
+                                    self.albums_song_scroll_offset = 0;
+                                }
                             }
-                        } else {
-                            self.albums_selected_idx = t.album_index;
+                            AlbumColumn::Songs => {
+                                if prev_col == AlbumColumn::Songs && self.albums_song_idx == t.item_index {
+                                    let albums = self.library.all_albums();
+                                    if let Some(alb) = albums.get(self.albums_selected_idx) {
+                                        let songs: Vec<Track> = self
+                                            .library
+                                            .tracks_by_artist_and_album(&alb.artist, &alb.album)
+                                            .into_iter()
+                                            .cloned()
+                                            .collect();
+                                        self.play_queue_at(songs, t.item_index);
+                                    }
+                                } else {
+                                    self.albums_song_idx = t.item_index;
+                                }
+                            }
                         }
                         self.focus = FocusArea::MainView;
                         return;
@@ -1067,34 +1664,42 @@ impl App {
                 }
             }
             ViewMode::Playlists => {
-                for t in &self.last_playlists_targets {
-                    if is_inside(t.rect, x, y) {
-                        if t.is_playlist_selector {
-                            if let Some(id) = &t.playlist_id {
-                                self.active_playlist_id = id.clone();
-                                self.playlists_track_idx = 0;
-                            }
-                        } else if let Some(idx) = t.track_index {
-                            if self.playlists_track_idx == idx {
-                                // Play!
-                                let track_ids: &[String] = if self.active_playlist_id == "__favorites__" {
-                                    &self.playlists_manager.favorites
-                                } else if self.active_playlist_id == "__recent__" {
-                                    &self.playlists_manager.recently_played
-                                } else if let Some(p) = self.playlists_manager.get_playlist(&self.active_playlist_id) {
-                                    &p.track_ids
-                                } else {
-                                    &[]
-                                };
-                                let songs: Vec<Track> = self.library.tracks_for_playlist(track_ids).into_iter().cloned().collect();
-                                self.play_queue_at(songs, idx);
-                            } else {
-                                self.playlists_track_idx = idx;
-                            }
+                let hit = self.last_playlists_targets.iter().find(|t| is_inside(t.rect, x, y)).cloned();
+                if let Some(t) = hit {
+                    if t.is_rename_button {
+                        if let Some(id) = t.playlist_id {
+                            self.prompt_rename_playlist(&id);
                         }
-                        self.focus = FocusArea::MainView;
-                        return;
+                    } else if t.is_delete_button {
+                        if let Some(id) = t.playlist_id {
+                            self.prompt_delete_playlist(&id);
+                        }
+                    } else if t.is_playlist_selector {
+                        if let Some(id) = t.playlist_id {
+                            self.active_playlist_id = id;
+                            self.playlists_track_idx = 0;
+                            self.playlists_scroll_offset = 0;
+                        }
+                    } else if let Some(idx) = t.track_index {
+                        if self.playlists_track_idx == idx {
+                            // Play!
+                            let track_ids: &[String] = if self.active_playlist_id == "__favorites__" {
+                                &self.playlists_manager.favorites
+                            } else if self.active_playlist_id == "__recent__" {
+                                &self.playlists_manager.recently_played
+                            } else if let Some(p) = self.playlists_manager.get_playlist(&self.active_playlist_id) {
+                                &p.track_ids
+                            } else {
+                                &[]
+                            };
+                            let songs: Vec<Track> = self.library.tracks_for_playlist(track_ids).into_iter().cloned().collect();
+                            self.play_queue_at(songs, idx);
+                        } else {
+                            self.playlists_track_idx = idx;
+                        }
                     }
+                    self.focus = FocusArea::MainView;
+                    return;
                 }
             }
             ViewMode::FileBrowser => {
@@ -1107,6 +1712,7 @@ impl App {
                                     self.browser_current_dir = item.path;
                                     self.browser_items = FileBrowserView::list_directory(&self.browser_current_dir);
                                     self.browser_selected_idx = 0;
+                                    self.browser_scroll_offset = 0;
                                 } else if let Some(track) = Scanner::read_track(&item.path) {
                                     self.play_track_now(track);
                                 }
@@ -1157,6 +1763,48 @@ impl App {
                     }
                 }
             }
+            ViewMode::SearchResults => {
+                for t in &self.last_search_targets {
+                    if is_inside(t.rect, x, y) {
+                        let prev_sec = self.search_section;
+                        self.search_section = t.section;
+                        match t.section {
+                            SearchSection::Artists => {
+                                if prev_sec == SearchSection::Artists && self.search_artist_idx == t.item_index {
+                                    let artists = self.library.search_artists(&self.search_query);
+                                    if let Some(art) = artists.get(t.item_index) {
+                                        let songs: Vec<Track> = self.library.tracks_by_artist(&art.name).into_iter().cloned().collect();
+                                        self.play_queue_at(songs, 0);
+                                    }
+                                } else {
+                                    self.search_artist_idx = t.item_index;
+                                }
+                            }
+                            SearchSection::Albums => {
+                                if prev_sec == SearchSection::Albums && self.search_album_idx == t.item_index {
+                                    let albums = self.library.search_albums(&self.search_query);
+                                    if let Some(alb) = albums.get(t.item_index) {
+                                        let songs: Vec<Track> = self.library.tracks_by_artist_and_album(&alb.artist, &alb.album).into_iter().cloned().collect();
+                                        self.play_queue_at(songs, 0);
+                                    }
+                                } else {
+                                    self.search_album_idx = t.item_index;
+                                }
+                            }
+                            SearchSection::Songs => {
+                                if prev_sec == SearchSection::Songs && self.search_song_idx == t.item_index {
+                                    let songs: Vec<Track> = self.library.search_tracks(&self.search_query).into_iter().cloned().collect();
+                                    self.play_queue_at(songs, t.item_index);
+                                } else {
+                                    self.search_song_idx = t.item_index;
+                                }
+                            }
+                        }
+                        self.focus = FocusArea::MainView;
+                        return;
+                    }
+                }
+            }
         }
     }
 
@@ -1199,50 +1847,134 @@ impl App {
             }
         }
 
-        // Otherwise scroll current view
+        let vis_0 = self.visible_main_rows(0);
+        let vis_2 = self.visible_main_rows(2);
+        let ma = self.last_main_area;
+
+        // Scroll only the scroll depth (scroll_offset) of the hovered pane without modifying selection
         match self.view_mode {
             ViewMode::Songs => {
-                if is_up {
-                    self.songs_selected_idx = self.songs_selected_idx.saturating_sub(1);
-                } else {
-                    let count = self.library.search(&self.search_query).len();
-                    if count > 0 {
-                        self.songs_selected_idx = (self.songs_selected_idx + 1).min(count - 1);
-                    }
-                }
+                let count = self.library.search(&self.search_query).len();
+                Self::scroll_pane(is_up, &mut self.songs_scroll_offset, count, vis_2);
             }
             ViewMode::Artists => {
-                if is_up {
-                    self.artists_selected_idx = self.artists_selected_idx.saturating_sub(1);
+                let col = if ma.width > 0 && x >= ma.left() {
+                    let col1_w = (ma.width * 28) / 100;
+                    let col2_w = (ma.width * 32) / 100;
+                    if x < ma.left() + col1_w {
+                        ArtistColumn::Artists
+                    } else if x < ma.left() + col1_w + col2_w {
+                        ArtistColumn::Albums
+                    } else {
+                        ArtistColumn::Songs
+                    }
                 } else {
-                    let count = self.library.artists().len();
-                    if count > 0 {
-                        self.artists_selected_idx = (self.artists_selected_idx + 1).min(count - 1);
+                    self.artists_col
+                };
+                match col {
+                    ArtistColumn::Artists => {
+                        let count = self.library.artists().len();
+                        Self::scroll_pane(is_up, &mut self.artists_scroll_offset, count, vis_0);
+                    }
+                    ArtistColumn::Albums => {
+                        let artists = self.library.artists();
+                        let count = artists
+                            .get(self.artists_selected_idx)
+                            .map(|art| self.library.albums_by_artist(art).len())
+                            .unwrap_or(0);
+                        Self::scroll_pane(is_up, &mut self.artists_album_scroll_offset, count, vis_0);
+                    }
+                    ArtistColumn::Songs => {
+                        let artists = self.library.artists();
+                        let count = artists
+                            .get(self.artists_selected_idx)
+                            .and_then(|art| {
+                                let albums = self.library.albums_by_artist(art);
+                                albums
+                                    .get(self.artists_album_idx)
+                                    .map(|alb| self.library.tracks_by_artist_and_album(art, alb).len())
+                            })
+                            .unwrap_or(0);
+                        Self::scroll_pane(is_up, &mut self.artists_song_scroll_offset, count, vis_0);
                     }
                 }
             }
             ViewMode::Albums => {
-                if is_up {
-                    self.albums_selected_idx = self.albums_selected_idx.saturating_sub(1);
+                let col = if ma.width > 0 && x >= ma.left() {
+                    let col1_w = (ma.width * 42) / 100;
+                    if x < ma.left() + col1_w {
+                        AlbumColumn::Albums
+                    } else {
+                        AlbumColumn::Songs
+                    }
                 } else {
-                    let count = self.library.all_albums().len();
-                    if count > 0 {
-                        self.albums_selected_idx = (self.albums_selected_idx + 1).min(count - 1);
+                    self.albums_col
+                };
+                match col {
+                    AlbumColumn::Albums => {
+                        let count = self.library.all_albums().len();
+                        Self::scroll_pane(is_up, &mut self.albums_scroll_offset, count, vis_0);
+                    }
+                    AlbumColumn::Songs => {
+                        let albums = self.library.all_albums();
+                        let count = albums
+                            .get(self.albums_selected_idx)
+                            .map(|alb| self.library.tracks_by_artist_and_album(&alb.artist, &alb.album).len())
+                            .unwrap_or(0);
+                        Self::scroll_pane(is_up, &mut self.albums_song_scroll_offset, count, vis_0);
                     }
                 }
             }
             ViewMode::Playlists => {
-                if is_up {
-                    self.playlists_track_idx = self.playlists_track_idx.saturating_sub(1);
+                let left_w = 28u16.min(ma.width / 3);
+                if ma.width > 0 && x >= ma.left() && x < ma.left() + left_w {
+                    let count = 2 + self.playlists_manager.playlists.len();
+                    Self::scroll_pane(is_up, &mut self.playlists_list_scroll_offset, count, vis_0);
                 } else {
-                    self.playlists_track_idx += 1;
+                    let track_ids: &[String] = if self.active_playlist_id == "__favorites__" {
+                        &self.playlists_manager.favorites
+                    } else if self.active_playlist_id == "__recent__" {
+                        &self.playlists_manager.recently_played
+                    } else if let Some(p) = self.playlists_manager.get_playlist(&self.active_playlist_id) {
+                        &p.track_ids
+                    } else {
+                        &[]
+                    };
+                    let count = self.library.tracks_for_playlist(track_ids).len();
+                    Self::scroll_pane(is_up, &mut self.playlists_scroll_offset, count, vis_2);
                 }
             }
             ViewMode::FileBrowser => {
-                if is_up {
-                    self.browser_selected_idx = self.browser_selected_idx.saturating_sub(1);
-                } else if !self.browser_items.is_empty() {
-                    self.browser_selected_idx = (self.browser_selected_idx + 1).min(self.browser_items.len() - 1);
+                let count = self.browser_items.len();
+                Self::scroll_pane(is_up, &mut self.browser_scroll_offset, count, vis_0);
+            }
+            ViewMode::SearchResults => {
+                let sec = if ma.width > 0 && x >= ma.left() {
+                    let col1_w = (ma.width * 25) / 100;
+                    let col2_w = (ma.width * 30) / 100;
+                    if x < ma.left() + col1_w {
+                        SearchSection::Artists
+                    } else if x < ma.left() + col1_w + col2_w {
+                        SearchSection::Albums
+                    } else {
+                        SearchSection::Songs
+                    }
+                } else {
+                    self.search_section
+                };
+                match sec {
+                    SearchSection::Artists => {
+                        let count = self.library.search_artists(&self.search_query).len();
+                        Self::scroll_pane(is_up, &mut self.search_artist_scroll, count, vis_0);
+                    }
+                    SearchSection::Albums => {
+                        let count = self.library.search_albums(&self.search_query).len();
+                        Self::scroll_pane(is_up, &mut self.search_album_scroll, count, vis_0);
+                    }
+                    SearchSection::Songs => {
+                        let count = self.library.search_tracks(&self.search_query).len();
+                        Self::scroll_pane(is_up, &mut self.search_song_scroll, count, vis_0);
+                    }
                 }
             }
             _ => {}
@@ -1250,16 +1982,22 @@ impl App {
     }
 
     pub fn set_view(&mut self, view: ViewMode) {
+        if view != ViewMode::SearchResults {
+            self.is_searching = false;
+        }
         self.view_mode = view;
-        self.sidebar_index = match view {
-            ViewMode::Songs => 0,
-            ViewMode::Artists => 1,
-            ViewMode::Albums => 2,
-            ViewMode::NowPlaying => 3,
-            ViewMode::FileBrowser => 4,
-            ViewMode::Playlists => 5,
-            ViewMode::Settings => 7 + self.playlists_manager.playlists.len() + 1,
-        };
+        let items = SidebarComponent {
+            current_view: view,
+            current_playlist_id: Some(&self.active_playlist_id),
+            playlists_manager: &self.playlists_manager,
+            is_focused: false,
+            selected_index: 0,
+            theme: &self.theme,
+        }.build_items();
+
+        if let Some(pos) = items.iter().position(|(_, _, is_active)| *is_active) {
+            self.sidebar_index = pos;
+        }
     }
 
     pub fn adjust_volume(&mut self, delta: f32) {
@@ -1288,10 +2026,17 @@ impl App {
 
     pub fn trigger_scan(&mut self) {
         self.is_scanning = true;
+        self.scan_found_count = 0;
         self.scan_status = "Scanning library folders...".to_string();
         let folders = self.config.library_folders.clone();
-        self.library.scan(&folders);
-        self.is_scanning = false;
-        self.scan_status = format!("Scan complete: {} audio tracks indexed", self.library.tracks.len());
+        let (tx, rx) = crossbeam_channel::unbounded();
+        self.scan_receiver = Some(rx);
+
+        std::thread::Builder::new()
+            .name("library-scanner".into())
+            .spawn(move || {
+                Scanner::scan_directories_with_sender(&folders, tx);
+            })
+            .ok();
     }
 }

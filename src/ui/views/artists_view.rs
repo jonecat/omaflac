@@ -1,10 +1,11 @@
+use crate::library::playlist::PlaylistsManager;
 use crate::library::track::Track;
 use crate::library::Library;
-use crate::ui::theme::Theme;
+use crate::ui::theme::OmarchyTheme;
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
-use ratatui::style::{Modifier, Style};
-use ratatui::widgets::{Block, Borders, Widget};
+use ratatui::style::Style;
+use ratatui::widgets::{Block, BorderType, Borders, Widget};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ArtistColumn {
@@ -25,8 +26,13 @@ pub struct ArtistsView<'a> {
     pub selected_artist_idx: usize,
     pub selected_album_idx: usize,
     pub selected_song_idx: usize,
+    pub scroll_artist_offset: usize,
+    pub scroll_album_offset: usize,
+    pub scroll_song_offset: usize,
     pub playing_track_id: Option<&'a str>,
+    pub playlists_manager: &'a PlaylistsManager,
     pub is_focused: bool,
+    pub theme: &'a OmarchyTheme,
 }
 
 impl<'a> ArtistsView<'a> {
@@ -41,7 +47,14 @@ impl<'a> ArtistsView<'a> {
             return targets;
         }
 
-        // Split area into 3 horizontal columns: Artists (30%), Albums (30%), Songs (40%)
+        // Fill background
+        for y in area.top()..area.bottom() {
+            for x in area.left()..area.right() {
+                buf[(x, y)].set_bg(self.theme.background);
+            }
+        }
+
+        // Split area into 3 horizontal columns: Artists (28%), Albums (32%), Songs (40%)
         let total_w = area.width;
         let col1_w = (total_w as f32 * 0.28) as u16;
         let col2_w = (total_w as f32 * 0.32) as u16;
@@ -68,25 +81,32 @@ impl<'a> ArtistsView<'a> {
         };
 
         // Render Column 1: Artists
-        let col1_border = if self.is_focused && self.active_column == ArtistColumn::Artists {
-            Theme::block_focus_style()
+        let is_col1_focused = self.is_focused && self.active_column == ArtistColumn::Artists;
+        let (b_style1, t_style1, t_text1) = if is_col1_focused {
+            (
+                self.theme.block_focus_style(),
+                self.theme.focused_title_style(),
+                format!(" ● Artists ({}) ", artists.len()),
+            )
         } else {
-            Theme::block_style()
+            (
+                self.theme.block_style(),
+                self.theme.unfocused_title_style(),
+                format!(" Artists ({}) ", artists.len()),
+            )
         };
         let block1 = Block::default()
             .borders(Borders::ALL)
-            .border_style(col1_border)
-            .title(format!(" Artists ({}) ", artists.len()))
-            .title_style(Style::default().fg(Theme::OMARCHY_GREEN).add_modifier(Modifier::BOLD));
+            .border_type(BorderType::Rounded)
+            .border_style(b_style1)
+            .style(Style::default().bg(self.theme.background))
+            .title(t_text1)
+            .title_style(t_style1);
         let inner1 = block1.inner(col1_rect);
         block1.render(col1_rect, buf);
 
         let rows1 = inner1.height as usize;
-        let offset1 = if self.selected_artist_idx >= rows1 {
-            self.selected_artist_idx.saturating_sub(rows1 / 2)
-        } else {
-            0
-        };
+        let offset1 = self.scroll_artist_offset.min(artists.len().saturating_sub(rows1));
 
         for (i, artist) in artists.iter().skip(offset1).take(rows1).enumerate() {
             let actual_idx = offset1 + i;
@@ -101,41 +121,57 @@ impl<'a> ArtistsView<'a> {
             });
 
             let style = if is_sel {
-                Theme::selected_row()
+                self.theme.selected_row()
             } else {
-                Style::default().fg(Theme::TEXT_PRIMARY)
+                self.theme.primary_text()
             };
 
             if is_sel {
                 for x in row_rect.left()..row_rect.right() {
-                    buf[(x, y)].set_bg(Theme::BG_HIGHLIGHT);
+                    buf[(x, y)].set_bg(self.theme.selection);
                 }
             }
 
             let text: String = artist.chars().take(inner1.width as usize).collect();
             buf.set_string(inner1.left(), y, &text, style);
         }
+        self.theme.render_scrollbar(
+            buf,
+            col1_rect,
+            inner1.top(),
+            inner1.height,
+            offset1,
+            rows1,
+            artists.len(),
+        );
 
         // Render Column 2: Albums
-        let col2_border = if self.is_focused && self.active_column == ArtistColumn::Albums {
-            Theme::block_focus_style()
+        let is_col2_focused = self.is_focused && self.active_column == ArtistColumn::Albums;
+        let (b_style2, t_style2, t_text2) = if is_col2_focused {
+            (
+                self.theme.block_focus_style(),
+                self.theme.focused_title_style(),
+                format!(" ● Albums ({}) ", albums.len()),
+            )
         } else {
-            Theme::block_style()
+            (
+                self.theme.block_style(),
+                self.theme.unfocused_title_style(),
+                format!(" Albums ({}) ", albums.len()),
+            )
         };
         let block2 = Block::default()
             .borders(Borders::ALL)
-            .border_style(col2_border)
-            .title(format!(" Albums ({}) ", albums.len()))
-            .title_style(Style::default().fg(Theme::OMARCHY_GREEN).add_modifier(Modifier::BOLD));
+            .border_type(BorderType::Rounded)
+            .border_style(b_style2)
+            .style(Style::default().bg(self.theme.background))
+            .title(t_text2)
+            .title_style(t_style2);
         let inner2 = block2.inner(col2_rect);
         block2.render(col2_rect, buf);
 
         let rows2 = inner2.height as usize;
-        let offset2 = if self.selected_album_idx >= rows2 {
-            self.selected_album_idx.saturating_sub(rows2 / 2)
-        } else {
-            0
-        };
+        let offset2 = self.scroll_album_offset.min(albums.len().saturating_sub(rows2));
 
         for (i, album) in albums.iter().skip(offset2).take(rows2).enumerate() {
             let actual_idx = offset2 + i;
@@ -150,47 +186,64 @@ impl<'a> ArtistsView<'a> {
             });
 
             let style = if is_sel {
-                Theme::selected_row()
+                self.theme.selected_row()
             } else {
-                Style::default().fg(Theme::TEXT_PRIMARY)
+                self.theme.primary_text()
             };
 
             if is_sel {
                 for x in row_rect.left()..row_rect.right() {
-                    buf[(x, y)].set_bg(Theme::BG_HIGHLIGHT);
+                    buf[(x, y)].set_bg(self.theme.selection);
                 }
             }
 
             let text: String = album.chars().take(inner2.width as usize).collect();
             buf.set_string(inner2.left(), y, &text, style);
         }
+        self.theme.render_scrollbar(
+            buf,
+            col2_rect,
+            inner2.top(),
+            inner2.height,
+            offset2,
+            rows2,
+            albums.len(),
+        );
 
         // Render Column 3: Songs
-        let col3_border = if self.is_focused && self.active_column == ArtistColumn::Songs {
-            Theme::block_focus_style()
+        let is_col3_focused = self.is_focused && self.active_column == ArtistColumn::Songs;
+        let (b_style3, t_style3, t_text3) = if is_col3_focused {
+            (
+                self.theme.block_focus_style(),
+                self.theme.focused_title_style(),
+                format!(" ● Songs ({}) ", songs.len()),
+            )
         } else {
-            Theme::block_style()
+            (
+                self.theme.block_style(),
+                self.theme.unfocused_title_style(),
+                format!(" Songs ({}) ", songs.len()),
+            )
         };
         let block3 = Block::default()
             .borders(Borders::ALL)
-            .border_style(col3_border)
-            .title(format!(" Songs ({}) ", songs.len()))
-            .title_style(Style::default().fg(Theme::OMARCHY_GREEN).add_modifier(Modifier::BOLD));
+            .border_type(BorderType::Rounded)
+            .border_style(b_style3)
+            .style(Style::default().bg(self.theme.background))
+            .title(t_text3)
+            .title_style(t_style3);
         let inner3 = block3.inner(col3_rect);
         block3.render(col3_rect, buf);
 
         let rows3 = inner3.height as usize;
-        let offset3 = if self.selected_song_idx >= rows3 {
-            self.selected_song_idx.saturating_sub(rows3 / 2)
-        } else {
-            0
-        };
+        let offset3 = self.scroll_song_offset.min(songs.len().saturating_sub(rows3));
 
         for (i, song) in songs.iter().skip(offset3).take(rows3).enumerate() {
             let actual_idx = offset3 + i;
             let y = inner3.top() + i as u16;
             let is_sel = actual_idx == self.selected_song_idx;
             let is_playing = self.playing_track_id == Some(&song.id);
+            let is_fav = self.playlists_manager.is_favorite(&song.id);
 
             let row_rect = Rect::new(inner3.left(), y, inner3.width, 1);
             targets.push(ArtistsViewClickTarget {
@@ -200,32 +253,47 @@ impl<'a> ArtistsView<'a> {
             });
 
             let style = if is_sel {
-                Theme::selected_row()
+                self.theme.selected_row()
             } else if is_playing {
-                Style::default().fg(Theme::OMARCHY_GREEN).add_modifier(Modifier::BOLD)
+                self.theme.accent_text()
             } else {
-                Style::default().fg(Theme::TEXT_PRIMARY)
+                self.theme.primary_text()
             };
 
             if is_sel {
                 for x in row_rect.left()..row_rect.right() {
-                    buf[(x, y)].set_bg(Theme::BG_HIGHLIGHT);
+                    buf[(x, y)].set_bg(self.theme.selection);
                 }
             }
 
-            let prefix = if is_playing { "▶ " } else { "  " };
+            let play_prefix = if is_playing { "▶" } else { " " };
+            let fav_prefix = if is_fav { "★ " } else { "  " };
             let trk_num = song.track_number.map(|n| format!("{:02}. ", n)).unwrap_or_default();
             let duration_str = song.formatted_duration();
 
-            let title_avail = inner3.width.saturating_sub(prefix.len() as u16 + trk_num.len() as u16 + duration_str.len() as u16 + 2) as usize;
+            let prefix = format!("{} {}{}", play_prefix, fav_prefix, trk_num);
+            let prefix_chars = prefix.chars().count() as u16;
+            let title_avail = inner3
+                .width
+                .saturating_sub(prefix_chars + duration_str.len() as u16 + 2)
+                as usize;
             let title: String = song.display_title().chars().take(title_avail).collect();
 
-            let line = format!("{}{}{}", prefix, trk_num, title);
+            let line = format!("{}{}", prefix, title);
             buf.set_string(inner3.left(), y, &line, style);
 
             let time_x = inner3.right().saturating_sub(duration_str.len() as u16);
-            buf.set_string(time_x, y, &duration_str, Style::default().fg(Theme::TEXT_MUTED));
+            buf.set_string(time_x, y, &duration_str, self.theme.muted_text());
         }
+        self.theme.render_scrollbar(
+            buf,
+            col3_rect,
+            inner3.top(),
+            inner3.height,
+            offset3,
+            rows3,
+            songs.len(),
+        );
 
         targets
     }

@@ -12,6 +12,8 @@ pub struct Track {
     pub album_artist: Option<String>,
     pub genre: Option<String>,
     pub year: Option<u32>,
+    #[serde(default)]
+    pub release_date: Option<String>,
     pub track_number: Option<u32>,
     pub disc_number: Option<u32>,
     pub duration_secs: u64,

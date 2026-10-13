@@ -36,6 +36,7 @@ fn main() -> anyhow::Result<()> {
 
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)?;
+    terminal.clear()?;
 
     // Initialize application state
     let mut app = match App::new() {
@@ -43,7 +44,7 @@ fn main() -> anyhow::Result<()> {
         Err(e) => {
             let _ = disable_raw_mode();
             let _ = execute!(io::stdout(), LeaveAlternateScreen, DisableMouseCapture, Show);
-            eprintln!("Failed to initialize omaflac: {}", e);
+            eprintln!("Failed to initialize OmaFLAC: {}", e);
             return Err(e);
         }
     };
@@ -94,6 +95,6 @@ fn main() -> anyhow::Result<()> {
     )?;
     terminal.show_cursor()?;
 
-    println!("omaflac terminated cleanly. Goodbye!");
+    println!("OmaFLAC terminated cleanly. Goodbye!");
     Ok(())
 }

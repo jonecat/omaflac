@@ -92,9 +92,9 @@ omaflac
 | **Toggle Shuffle** | `z` or click `🔀` |
 | **Global Search** | `/` or click search bar |
 | **Add Track to Playlist** | `a` |
-| **Toggle Favorite Track** | `f` or click ⭐ |
+| **Toggle Favorite Track** | `f` or click `★` |
 | **Switch Sidebar / Main Focus** | `Tab` / `Shift+Tab` |
-| **Direct View Shortcuts** | `1` Songs, `2` Artists, `3` Albums, `4` Now Playing, `5` Playlists, `6` Files, `7` Settings |
+| **Direct View Shortcuts** | `1` Artists, `2` Albums, `3` Songs, `4` Now Playing, `5` Playlists, `6` Settings |
 | **Navigate Items** | `j` / `k` or `↑` / `↓` or mouse scroll |
 | **Switch Columns (Artists View)** | `h` / `l` or `←` / `→` or click column |
 | **Play Selected Item** | `Enter` or double-click row |

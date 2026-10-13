@@ -1,0 +1,12 @@
+# OmaFLAC Cursor Rules
+
+You are an expert Rust systems programmer working on **OmaFLAC**, a high-fidelity terminal audio player built with Ratatui, Symphonia, CPAL, and Lofty for Omarchy Linux.
+
+## Core Directives
+- **Zero Stdout/Stderr Noise**: Never use `println!` or `eprintln!` while the TUI is running. Doing so corrupts terminal cells in raw alternate-screen mode.
+- **Monochromatic Glyphs**: Do not introduce colored emojis. Use theme-colored Unicode glyphs (`★`, `≡`, `◉`, `○`, `▪`, `▸`, `♪`, `♫`, `⟳`, `+`).
+- **Rounded Borders**: All Ratatui blocks must use `.border_type(BorderType::Rounded)` to match `btop`'s design.
+- **Audio Gapless Pipeline**: Next tracks are preloaded asynchronously via `set_next_track`. Seamless transitions rely on `AudioItem::Boundary` tokens without stopping the CPAL output stream.
+- **Sidebar Order**: 1: Artists, 2: Albums, 3: Songs, 4: Now Playing, 5: Playlists, 6: Settings. Default startup view is `ViewMode::Artists`.
+- **Focus Areas**: Always highlight the active `FocusArea` (`Sidebar`, `MainView`, `PlayerBar`) with `theme.block_focus_style()` and `●` in title.
+- **Verification**: Always run `cargo check` and `cargo test` after making changes. When deploying, compile with `cargo build --release` and copy to `~/.local/bin/omaflac`.

@@ -9,6 +9,17 @@ pub const SUPPORTED_EXTENSIONS: &[&str] = &[
     "flac", "mp3", "ogg", "oga", "wav", "wave", "m4a", "aac", "opus", "alac", "aiff", "aif",
 ];
 
+#[derive(Debug, Clone)]
+pub enum ScanUpdate {
+    Progress {
+        current_file: String,
+        found_count: usize,
+    },
+    Completed {
+        tracks: Vec<Track>,
+    },
+}
+
 pub struct Scanner;
 
 impl Scanner {
@@ -23,6 +34,20 @@ impl Scanner {
     }
 
     pub fn scan_directories<P: AsRef<Path>>(directories: &[P]) -> Vec<Track> {
+        let (tx, rx) = crossbeam_channel::unbounded();
+        Self::scan_directories_with_sender(directories, tx);
+        while let Ok(update) = rx.recv() {
+            if let ScanUpdate::Completed { tracks } = update {
+                return tracks;
+            }
+        }
+        Vec::new()
+    }
+
+    pub fn scan_directories_with_sender<P: AsRef<Path>>(
+        directories: &[P],
+        sender: crossbeam_channel::Sender<ScanUpdate>,
+    ) {
         let mut tracks = Vec::new();
         for dir in directories {
             let dir_path = dir.as_ref();
@@ -37,7 +62,17 @@ impl Scanner {
                 let path = entry.path();
                 if path.is_file() && Self::is_audio_file(path) {
                     if let Some(track) = Self::read_track(path) {
+                        let file_name = path
+                            .file_name()
+                            .map(|s| s.to_string_lossy().to_string())
+                            .unwrap_or_default();
                         tracks.push(track);
+                        if tracks.len() == 1 || tracks.len() % 5 == 0 {
+                            let _ = sender.send(ScanUpdate::Progress {
+                                current_file: file_name,
+                                found_count: tracks.len(),
+                            });
+                        }
                     }
                 }
             }
@@ -53,7 +88,7 @@ impl Scanner {
                 .then_with(|| a.title.cmp(&b.title))
         });
 
-        tracks
+        let _ = sender.send(ScanUpdate::Completed { tracks });
     }
 
     pub fn has_folder_cover(dir: &Path) -> bool {
@@ -151,7 +186,11 @@ impl Scanner {
 
             let album_artist = tag.and_then(|t| t.get_string(&lofty::tag::ItemKey::AlbumArtist).map(|s| s.to_string()));
             let genre = tag.and_then(|t| t.genre().map(|s| s.to_string()));
-            let year = tag.and_then(|t| t.year());
+            let release_date = tag.and_then(Self::extract_original_release_date);
+            let year = release_date
+                .as_deref()
+                .and_then(Self::parse_year_prefix)
+                .or_else(|| tag.and_then(|t| t.year()));
             let track_number = tag.and_then(|t| t.track());
             let disc_number = tag.and_then(|t| t.disk());
 
@@ -172,6 +211,7 @@ impl Scanner {
                 album_artist,
                 genre,
                 year,
+                release_date,
                 track_number,
                 disc_number,
                 duration_secs,
@@ -206,6 +246,7 @@ impl Scanner {
             album_artist: None,
             genre: None,
             year: None,
+            release_date: None,
             track_number: None,
             disc_number: None,
             duration_secs: 0,
@@ -215,5 +256,159 @@ impl Scanner {
             bitrate_kbps: None,
             has_cover_art: folder_has_cover,
         })
+    }
+
+    fn parse_year_prefix(date_str: &str) -> Option<u32> {
+        let trimmed = date_str.trim();
+        if trimmed.len() >= 4 {
+            trimmed[..4].parse::<u32>().ok()
+        } else {
+            None
+        }
+    }
+
+    fn extract_original_release_date(tag: &lofty::tag::Tag) -> Option<String> {
+        use lofty::tag::ItemKey;
+
+        // 1. Explicit Original Release Date tags (ORIGINALDATE, ORIGINALYEAR, TDOR, TORY)
+        if let Some(orig) = tag
+            .get_string(&ItemKey::OriginalReleaseDate)
+            .map(|s| s.trim())
+            .filter(|s| !s.is_empty())
+        {
+            return Some(orig.to_string());
+        }
+
+        for custom_key in ["ORIGINALDATE", "ORIGINALYEAR", "ORIGINAL_DATE", "ORIGYEAR"] {
+            if let Some(orig) = tag
+                .get_string(&ItemKey::Unknown(custom_key.to_string()))
+                .map(|s| s.trim())
+                .filter(|s| !s.is_empty())
+            {
+                return Some(orig.to_string());
+            }
+        }
+
+        // 2. MusicBrainz Release Group ID -> first-release-date (original album release date)
+        let rg_id = tag
+            .get_string(&ItemKey::MusicBrainzReleaseGroupId)
+            .or_else(|| tag.get_string(&ItemKey::Unknown("MUSICBRAINZ_RELEASEGROUPID".to_string())))
+            .map(|s| s.trim())
+            .filter(|s| !s.is_empty());
+
+        if let Some(rg_id) = rg_id {
+            if let Some(first_date) = Self::resolve_musicbrainz_release_group_date(rg_id) {
+                return Some(first_date);
+            }
+        }
+
+        // 3. Fallback to standard ReleaseDate / RecordingDate (DATE) / Year
+        if let Some(rel) = tag
+            .get_string(&ItemKey::ReleaseDate)
+            .or_else(|| tag.get_string(&ItemKey::RecordingDate))
+            .map(|s| s.trim())
+            .filter(|s| !s.is_empty())
+        {
+            return Some(rel.to_string());
+        }
+
+        tag.year().map(|y| y.to_string())
+    }
+
+    fn release_dates_cache_path() -> PathBuf {
+        let mut path = dirs::config_dir().unwrap_or_else(|| PathBuf::from("."));
+        path.push("omaflac");
+        std::fs::create_dir_all(&path).ok();
+        path.push("release_dates.json");
+        path
+    }
+
+    fn resolve_musicbrainz_release_group_date(rg_id: &str) -> Option<String> {
+        use std::collections::BTreeMap;
+        use std::sync::{Mutex, OnceLock};
+
+        static CACHE: OnceLock<Mutex<BTreeMap<String, String>>> = OnceLock::new();
+        let mutex = CACHE.get_or_init(|| {
+            let mut map = BTreeMap::new();
+            // Seed known MusicBrainz Release Group original release dates
+            map.insert(
+                "416bb5e5-c7d1-3977-8fd7-7c9daf6c2be6".to_string(),
+                "1977-02-04".to_string(),
+            );
+            map.insert(
+                "89e0c763-1b48-35c7-a7a6-1f4c1b7fbf37".to_string(),
+                "1990-10-08".to_string(),
+            );
+            map.insert(
+                "db5cf893-a9c0-35e0-86ab-433f630273b7".to_string(),
+                "1991-03-04".to_string(),
+            );
+            map.insert(
+                "f5093c06-23e3-404f-aeaa-40f72885ee3a".to_string(),
+                "1973-03-24".to_string(),
+            );
+            map.insert(
+                "1a272023-10d3-38ee-bab3-317b55fcc21d".to_string(),
+                "1975-09-12".to_string(),
+            );
+            map.insert(
+                "9f7a4c28-8fa2-3113-929c-c47a9f7982c3".to_string(),
+                "1967-05-26".to_string(),
+            );
+
+            let cache_path = Self::release_dates_cache_path();
+            if let Ok(file) = std::fs::File::open(&cache_path) {
+                if let Ok(disk_map) = serde_json::from_reader::<_, BTreeMap<String, String>>(file) {
+                    map.extend(disk_map);
+                }
+            }
+            Mutex::new(map)
+        });
+
+        if let Ok(guard) = mutex.lock() {
+            if let Some(cached) = guard.get(rg_id) {
+                return if cached.is_empty() {
+                    None
+                } else {
+                    Some(cached.clone())
+                };
+            }
+        }
+
+        // Fetch from MusicBrainz API silently via curl if not cached
+        let url = format!("https://musicbrainz.org/ws/2/release-group/{}?fmt=json", rg_id);
+        let fetched = std::process::Command::new("curl")
+            .args([
+                "-s",
+                "--max-time",
+                "3",
+                "-A",
+                "OmaFLAC/0.1.0 ( https://github.com/jonecat/omaflac )",
+                &url,
+            ])
+            .output()
+            .ok()
+            .and_then(|out| {
+                if out.status.success() {
+                    serde_json::from_slice::<serde_json::Value>(&out.stdout).ok()
+                } else {
+                    None
+                }
+            })
+            .and_then(|json| {
+                json.get("first-release-date")
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.trim().to_string())
+                    .filter(|s| !s.is_empty())
+            });
+
+        if let Ok(mut guard) = mutex.lock() {
+            guard.insert(rg_id.to_string(), fetched.clone().unwrap_or_default());
+            if let Ok(file) = std::fs::File::create(Self::release_dates_cache_path()) {
+                let _ = serde_json::to_writer_pretty(file, &*guard);
+            }
+        }
+
+        fetched
     }
 }

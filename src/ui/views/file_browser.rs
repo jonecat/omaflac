@@ -1,9 +1,9 @@
 use crate::library::scanner::Scanner;
-use crate::ui::theme::Theme;
+use crate::ui::theme::OmarchyTheme;
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
 use ratatui::style::{Modifier, Style};
-use ratatui::widgets::{Block, Borders, Widget};
+use ratatui::widgets::{Block, BorderType, Borders, Widget};
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -25,6 +25,7 @@ pub struct FileBrowserView<'a> {
     pub selected_index: usize,
     pub scroll_offset: usize,
     pub is_focused: bool,
+    pub theme: &'a OmarchyTheme,
 }
 
 impl<'a> FileBrowserView<'a> {
@@ -87,18 +88,34 @@ impl<'a> FileBrowserView<'a> {
     ) -> Vec<FileBrowserClickTarget> {
         let mut targets = Vec::new();
 
-        let border_style = if self.is_focused {
-            Theme::block_focus_style()
+        // Fill background
+        for y in area.top()..area.bottom() {
+            for x in area.left()..area.right() {
+                buf[(x, y)].set_bg(self.theme.background);
+            }
+        }
+
+        let (border_style, title_style, title_text) = if self.is_focused {
+            (
+                self.theme.block_focus_style(),
+                self.theme.focused_title_style(),
+                format!(" ● File Browser: {} ", self.current_dir.display()),
+            )
         } else {
-            Theme::block_style()
+            (
+                self.theme.block_style(),
+                self.theme.unfocused_title_style(),
+                format!(" File Browser: {} ", self.current_dir.display()),
+            )
         };
 
-        let title = format!(" File Browser: {} ", self.current_dir.display());
         let block = Block::default()
             .borders(Borders::ALL)
+            .border_type(BorderType::Rounded)
             .border_style(border_style)
-            .title(title)
-            .title_style(Style::default().fg(Theme::OMARCHY_GREEN).add_modifier(Modifier::BOLD));
+            .style(Style::default().bg(self.theme.background))
+            .title(title_text)
+            .title_style(title_style);
 
         let inner = block.inner(area);
         block.render(area, buf);
@@ -108,7 +125,8 @@ impl<'a> FileBrowserView<'a> {
         }
 
         let rows_avail = inner.height as usize;
-        let start_idx = self.scroll_offset.min(self.items.len());
+        let max_scroll = self.items.len().saturating_sub(rows_avail);
+        let start_idx = self.scroll_offset.min(max_scroll);
         let end_idx = (start_idx + rows_avail).min(self.items.len());
 
         for (i, item) in self.items[start_idx..end_idx].iter().enumerate() {
@@ -123,24 +141,34 @@ impl<'a> FileBrowserView<'a> {
             });
 
             let style = if is_sel {
-                Theme::selected_row()
+                self.theme.selected_row()
             } else if item.is_dir {
-                Style::default().fg(Theme::ACCENT_CYAN).add_modifier(Modifier::BOLD)
+                Style::default().fg(self.theme.cyan).add_modifier(Modifier::BOLD)
             } else {
-                Style::default().fg(Theme::TEXT_PRIMARY)
+                self.theme.primary_text()
             };
 
             if is_sel {
                 for x in row_rect.left()..row_rect.right() {
-                    buf[(x, y)].set_bg(Theme::BG_HIGHLIGHT);
+                    buf[(x, y)].set_bg(self.theme.selection);
                 }
             }
 
-            let icon = if item.is_dir { "📁 " } else { "🎵 " };
+            let icon = if item.is_dir { "▸ " } else { "♪ " };
             let line = format!("{}{}", icon, item.name);
             let trunc: String = line.chars().take(inner.width as usize).collect();
             buf.set_string(inner.left(), y, &trunc, style);
         }
+
+        self.theme.render_scrollbar(
+            buf,
+            area,
+            inner.top(),
+            inner.height,
+            start_idx,
+            rows_avail,
+            self.items.len(),
+        );
 
         targets
     }

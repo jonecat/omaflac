@@ -27,7 +27,22 @@ impl Library {
     pub fn load() -> Self {
         let path = Self::library_path();
         if let Ok(file) = std::fs::File::open(&path) {
-            if let Ok(lib) = serde_json::from_reader(file) {
+            if let Ok(mut lib) = serde_json::from_reader::<_, Self>(file) {
+                let mut updated = false;
+                for track in &mut lib.tracks {
+                    if track.release_date.is_none() {
+                        if let Some(fresh) = Scanner::read_track(&track.path) {
+                            if fresh.release_date.is_some() {
+                                track.release_date = fresh.release_date;
+                                track.year = fresh.year;
+                                updated = true;
+                            }
+                        }
+                    }
+                }
+                if updated {
+                    lib.save().ok();
+                }
                 return lib;
             }
         }
@@ -126,6 +141,39 @@ impl Library {
         self.tracks.iter().filter(|t| t.matches_query(query)).collect()
     }
 
+    pub fn search_artists(&self, query: &str) -> Vec<ArtistSummary> {
+        let q = query.trim().to_lowercase();
+        let mut results = Vec::new();
+        for artist in self.artists() {
+            if q.is_empty() || artist.to_lowercase().contains(&q) {
+                let albums = self.albums_by_artist(&artist);
+                let tracks = self.tracks_by_artist(&artist);
+                results.push(ArtistSummary {
+                    name: artist,
+                    album_count: albums.len(),
+                    track_count: tracks.len(),
+                });
+            }
+        }
+        results
+    }
+
+    pub fn search_albums(&self, query: &str) -> Vec<AlbumSummary> {
+        let q = query.trim().to_lowercase();
+        self.all_albums()
+            .into_iter()
+            .filter(|a| {
+                q.is_empty()
+                    || a.album.to_lowercase().contains(&q)
+                    || a.artist.to_lowercase().contains(&q)
+            })
+            .collect()
+    }
+
+    pub fn search_tracks(&self, query: &str) -> Vec<&Track> {
+        self.search(query)
+    }
+
     pub fn tracks_for_playlist<'a>(
         &'a self,
         track_ids: &[String],
@@ -135,6 +183,13 @@ impl Library {
             .filter_map(|id| self.get_track(id))
             .collect()
     }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ArtistSummary {
+    pub name: String,
+    pub album_count: usize,
+    pub track_count: usize,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

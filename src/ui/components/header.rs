@@ -1,4 +1,4 @@
-use crate::ui::theme::Theme;
+use crate::ui::theme::OmarchyTheme;
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
 use ratatui::style::{Modifier, Style};
@@ -9,6 +9,7 @@ pub struct HeaderComponent<'a> {
     pub total_tracks: usize,
     pub search_query: &'a str,
     pub is_searching: bool,
+    pub theme: &'a OmarchyTheme,
 }
 
 pub struct HeaderClickTarget {
@@ -24,19 +25,27 @@ impl<'a> HeaderComponent<'a> {
     ) -> HeaderClickTarget {
         let block = Block::default()
             .borders(Borders::BOTTOM)
-            .border_style(Theme::block_style());
+            .border_style(self.theme.block_style())
+            .style(Style::default().bg(self.theme.dark_background));
 
         block.render(area, buf);
+
+        // Fill background
+        for y in area.top()..area.bottom() {
+            for x in area.left()..area.right() {
+                buf[(x, y)].set_bg(self.theme.dark_background);
+            }
+        }
 
         let y = area.top();
 
         // Logo
-        let logo = " ♬ omaflac";
+        let logo = " ♬ OmaFLAC";
         buf.set_string(
             area.left(),
             y,
             logo,
-            Style::default().fg(Theme::OMARCHY_GREEN).add_modifier(Modifier::BOLD),
+            Style::default().fg(self.theme.accent).add_modifier(Modifier::BOLD),
         );
 
         let x = area.left() + logo.len() as u16 + 2;
@@ -47,7 +56,7 @@ impl<'a> HeaderComponent<'a> {
             x,
             y,
             &breadcrumb,
-            Style::default().fg(Theme::TEXT_SECONDARY),
+            Style::default().fg(self.theme.light_foreground),
         );
 
         // Right side: Help button & Search bar
@@ -58,7 +67,7 @@ impl<'a> HeaderComponent<'a> {
             help_x,
             y,
             help_text,
-            Style::default().fg(Theme::ACCENT_CYAN),
+            Style::default().fg(self.theme.cyan).add_modifier(Modifier::BOLD),
         );
 
         // Search box
@@ -69,23 +78,23 @@ impl<'a> HeaderComponent<'a> {
         if search_x > x + breadcrumb.len() as u16 + 2 {
             let (search_str, search_style) = if self.is_searching {
                 (
-                    format!(" 🔍 {}█", self.search_query),
-                    Style::default().bg(Theme::BG_CARD).fg(Theme::OMARCHY_GREEN).add_modifier(Modifier::BOLD),
+                    format!(" ⌕ {}█", self.search_query),
+                    Style::default().bg(self.theme.lighter_background).fg(self.theme.accent).add_modifier(Modifier::BOLD),
                 )
             } else if !self.search_query.is_empty() {
                 (
-                    format!(" 🔍 {} [/]", self.search_query),
-                    Style::default().bg(Theme::BG_CARD).fg(Theme::TEXT_PRIMARY),
+                    format!(" ⌕ {} [/]", self.search_query),
+                    Style::default().bg(self.theme.lighter_background).fg(self.theme.foreground),
                 )
             } else {
                 (
-                    " 🔍 Search [/]...".to_string(),
-                    Style::default().bg(Theme::BG_CARD).fg(Theme::TEXT_MUTED),
+                    " ⌕ Search [/]...".to_string(),
+                    Style::default().bg(self.theme.lighter_background).fg(self.theme.muted),
                 )
             };
 
             for col in 0..search_box_width {
-                buf[(search_x + col, y)].set_bg(Theme::BG_CARD);
+                buf[(search_x + col, y)].set_bg(self.theme.lighter_background);
             }
             let truncated: String = search_str.chars().take(search_box_width as usize).collect();
             buf.set_string(search_x, y, &truncated, search_style);
