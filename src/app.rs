@@ -5,6 +5,10 @@ use crate::library::scanner::{ScanUpdate, Scanner};
 use crate::library::track::Track;
 use crate::library::Library;
 use crate::ui::artwork::ArtworkCache;
+use crate::ui::components::about_modal::AboutModalClickTarget;
+use crate::ui::components::folder_dialog::{
+    FolderDialogAction, FolderDialogClickTarget, FolderDialogFocus, FolderDialogState,
+};
 use crate::ui::components::header::HeaderClickTarget;
 use crate::ui::components::player_bar::{PlayerAction, PlayerClickTarget};
 use crate::ui::components::playlist_dialog::{PlaylistDialogClickTarget, PlaylistDialogMode};
@@ -66,7 +70,9 @@ pub struct App {
 
     // Modals
     pub show_help: bool,
+    pub show_about: bool,
     pub playlist_dialog: Option<(PlaylistDialogMode, Option<Track>)>,
+    pub folder_dialog: Option<FolderDialogState>,
 
     // Songs view state
     pub songs_selected_idx: usize,
@@ -123,6 +129,8 @@ pub struct App {
     pub last_browser_targets: Vec<FileBrowserItemTarget>,
     pub last_settings_targets: Vec<SettingsClickTarget>,
     pub last_dialog_targets: Vec<PlaylistDialogClickTarget>,
+    pub last_folder_dialog_targets: Vec<FolderDialogClickTarget>,
+    pub last_about_target: Option<AboutModalClickTarget>,
     pub last_search_targets: Vec<SearchResultsClickTarget>,
 }
 
@@ -178,7 +186,9 @@ impl App {
             search_album_scroll: 0,
             search_song_scroll: 0,
             show_help: false,
+            show_about: false,
             playlist_dialog: None,
+            folder_dialog: None,
             songs_selected_idx: 0,
             songs_scroll_offset: 0,
             artists_col: ArtistColumn::Artists,
@@ -221,6 +231,8 @@ impl App {
             last_browser_targets: Vec::new(),
             last_settings_targets: Vec::new(),
             last_dialog_targets: Vec::new(),
+            last_folder_dialog_targets: Vec::new(),
+            last_about_target: None,
             last_search_targets: Vec::new(),
         };
 
@@ -499,16 +511,163 @@ impl App {
         }
     }
 
+    pub fn open_folder_dialog(&mut self, initial_focus: FolderDialogFocus) {
+        let start_dir = if self.is_entering_folder && !self.new_folder_input.trim().is_empty() {
+            let candidate = PathBuf::from(self.new_folder_input.trim());
+            if candidate.is_dir() {
+                candidate
+            } else if let Some(parent) = candidate.parent().filter(|p| p.is_dir()) {
+                parent.to_path_buf()
+            } else {
+                dirs::home_dir().unwrap_or_else(|| PathBuf::from("/"))
+            }
+        } else {
+            self.config
+                .library_folders
+                .get(self.settings_selected_folder)
+                .or_else(|| self.config.library_folders.last())
+                .filter(|p| p.is_dir())
+                .cloned()
+                .or_else(|| dirs::audio_dir().filter(|p| p.is_dir()))
+                .or_else(dirs::home_dir)
+                .unwrap_or_else(|| PathBuf::from("/"))
+        };
+
+        let mut state = FolderDialogState::new(start_dir);
+        state.focus = initial_focus;
+        self.folder_dialog = Some(state);
+        self.is_entering_folder = false;
+        self.new_folder_input.clear();
+    }
+
+    pub fn confirm_folder_dialog(&mut self) {
+        let Some(mut state) = self.folder_dialog.take() else {
+            return;
+        };
+        let resolved = state.resolve_input_path();
+        if resolved.is_dir() {
+            let clean_path = std::fs::canonicalize(&resolved).unwrap_or(resolved);
+            if !self.config.library_folders.contains(&clean_path) {
+                self.config.library_folders.push(clean_path);
+                self.config.save().ok();
+                self.trigger_scan();
+            } else {
+                self.scan_status = format!("Folder already in library: {}", clean_path.display());
+            }
+            self.folder_dialog = None;
+        } else {
+            state.status_message = Some(
+                "Directory does not exist. Please enter or select a valid folder.".to_string(),
+            );
+            self.folder_dialog = Some(state);
+        }
+    }
+
+    fn handle_folder_dialog_key(&mut self, key: KeyEvent) {
+        if key.code == KeyCode::Esc {
+            self.folder_dialog = None;
+            return;
+        }
+
+        let Some(state) = &mut self.folder_dialog else {
+            return;
+        };
+
+        if key.code == KeyCode::Tab || key.code == KeyCode::BackTab {
+            state.focus = match state.focus {
+                FolderDialogFocus::PathInput => FolderDialogFocus::FolderList,
+                FolderDialogFocus::FolderList => FolderDialogFocus::PathInput,
+            };
+            return;
+        }
+
+        match state.focus {
+            FolderDialogFocus::PathInput => match key.code {
+                KeyCode::Enter => {
+                    self.confirm_folder_dialog();
+                }
+                KeyCode::Down => {
+                    state.focus = FolderDialogFocus::FolderList;
+                }
+                KeyCode::Up => {
+                    state.focus = FolderDialogFocus::FolderList;
+                }
+                KeyCode::Char('u') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                    state.path_input.clear();
+                    state.status_message = None;
+                }
+                KeyCode::Backspace => {
+                    state.path_input.pop();
+                    state.on_path_input_edited();
+                }
+                KeyCode::Char(c) => {
+                    state.path_input.push(c);
+                    state.on_path_input_edited();
+                }
+                _ => {}
+            },
+            FolderDialogFocus::FolderList => match key.code {
+                KeyCode::Up | KeyCode::Char('k') => {
+                    let next = state.selected_idx.saturating_sub(1);
+                    state.select_index(next);
+                }
+                KeyCode::Down | KeyCode::Char('j') => {
+                    let next = state.selected_idx + 1;
+                    state.select_index(next);
+                }
+                KeyCode::PageUp => {
+                    let step = state.visible_rows.max(1);
+                    let next = state.selected_idx.saturating_sub(step);
+                    state.select_index(next);
+                }
+                KeyCode::PageDown => {
+                    let step = state.visible_rows.max(1);
+                    let next = state.selected_idx + step;
+                    state.select_index(next);
+                }
+                KeyCode::Enter | KeyCode::Right | KeyCode::Char('l') => {
+                    state.open_selected_entry();
+                }
+                KeyCode::Left | KeyCode::Backspace | KeyCode::Char('h') => {
+                    state.go_parent();
+                }
+                KeyCode::Char('.') => {
+                    state.show_hidden = !state.show_hidden;
+                    state.refresh_entries();
+                }
+                KeyCode::Char('/') => {
+                    state.focus = FolderDialogFocus::PathInput;
+                }
+                KeyCode::Char(' ') | KeyCode::Char('a') => {
+                    self.confirm_folder_dialog();
+                }
+                _ => {}
+            },
+        }
+    }
+
     pub fn handle_key(&mut self, key: KeyEvent) {
-        // 1. Help Modal active
+        // 1. Help or About Modal active
         if self.show_help {
             if key.code == KeyCode::Esc || key.code == KeyCode::Char('?') || key.code == KeyCode::Char('q') {
                 self.show_help = false;
             }
             return;
         }
+        if self.show_about {
+            if key.code == KeyCode::Esc || key.code == KeyCode::Enter || key.code == KeyCode::Char(' ') || key.code == KeyCode::Char('q') {
+                self.show_about = false;
+            }
+            return;
+        }
 
-        // 2. Playlist Dialog active
+        // 2. Folder Dialog active
+        if self.folder_dialog.is_some() {
+            self.handle_folder_dialog_key(key);
+            return;
+        }
+
+        // 3. Playlist Dialog active
         if let Some((mode, track)) = self.playlist_dialog.take() {
             match mode {
                 PlaylistDialogMode::SelectPlaylist { selected_idx } => match key.code {
@@ -611,7 +770,7 @@ impl App {
             return;
         }
 
-        // 3. Search Mode active
+        // 4. Search Mode active
         if self.is_searching {
             if key.modifiers.contains(KeyModifiers::CONTROL)
                 && (key.code == KeyCode::Char('c') || key.code == KeyCode::Char('q'))
@@ -659,7 +818,7 @@ impl App {
             return;
         }
 
-        // 4. Folder input mode in Settings
+        // 5. Folder input mode in Settings
         if self.is_entering_folder {
             match key.code {
                 KeyCode::Esc => {
@@ -689,7 +848,7 @@ impl App {
             return;
         }
 
-        // 5. Global Hotkeys
+        // 6. Global Hotkeys
         match key.code {
             KeyCode::Char('q') => {
                 self.should_quit = true;
@@ -826,7 +985,15 @@ impl App {
                 return;
             }
             KeyCode::Char('a') => {
-                self.prompt_add_to_playlist();
+                if self.view_mode == ViewMode::Settings {
+                    self.open_folder_dialog(FolderDialogFocus::PathInput);
+                } else {
+                    self.prompt_add_to_playlist();
+                }
+                return;
+            }
+            KeyCode::Char('b') if self.view_mode == ViewMode::Settings => {
+                self.open_folder_dialog(FolderDialogFocus::FolderList);
                 return;
             }
             KeyCode::Char('f') => {
@@ -957,8 +1124,8 @@ impl App {
     }
 
     fn visible_main_rows(&self, header_lines: u16) -> usize {
-        let h = if self.last_main_area.height > 2 + header_lines {
-            self.last_main_area.height - 2 - header_lines
+        let h = if self.last_main_area.height > 3 + header_lines {
+            self.last_main_area.height - 3 - header_lines
         } else {
             15
         };
@@ -984,7 +1151,7 @@ impl App {
 
     fn handle_main_view_key(&mut self, key: KeyEvent) {
         let vis_0 = self.visible_main_rows(0);
-        let vis_2 = self.visible_main_rows(2);
+        let vis_2 = self.visible_main_rows(1);
 
         match self.view_mode {
             ViewMode::Songs => match key.code {
@@ -1266,8 +1433,10 @@ impl App {
                     }
                 }
                 KeyCode::Char('a') => {
-                    self.is_entering_folder = true;
-                    self.new_folder_input.clear();
+                    self.open_folder_dialog(FolderDialogFocus::PathInput);
+                }
+                KeyCode::Char('b') => {
+                    self.open_folder_dialog(FolderDialogFocus::FolderList);
                 }
                 KeyCode::Char('s') => {
                     self.trigger_scan();
@@ -1391,13 +1560,117 @@ impl App {
             }
         }
 
-        // 1. Help modal click to close
+        // 1. Help or About modal click
         if self.show_help {
             self.show_help = false;
             return;
         }
+        if self.show_about {
+            if let Some(target) = &self.last_about_target {
+                if is_inside(target.url_rect, x, y) {
+                    let cmd = if cfg!(target_os = "macos") {
+                        "open"
+                    } else {
+                        "xdg-open"
+                    };
+                    std::process::Command::new(cmd)
+                        .arg("https://github.com/jonecat/omaflac")
+                        .stdin(std::process::Stdio::null())
+                        .stdout(std::process::Stdio::null())
+                        .stderr(std::process::Stdio::null())
+                        .spawn()
+                        .ok();
+                    return;
+                }
+                if is_inside(target.close_rect, x, y) || !is_inside(target.modal_rect, x, y) {
+                    self.show_about = false;
+                    return;
+                }
+            } else {
+                self.show_about = false;
+            }
+            return;
+        }
 
-        // 2. Playlist Dialog click
+        // 2. Folder Dialog click
+        if self.folder_dialog.is_some() {
+            let hit_action = self
+                .last_folder_dialog_targets
+                .iter()
+                .find(|t| is_inside(t.rect, x, y))
+                .map(|t| t.action.clone());
+
+            if let Some(action) = hit_action {
+                match action {
+                    FolderDialogAction::FocusPathInput => {
+                        if let Some(state) = &mut self.folder_dialog {
+                            state.focus = FolderDialogFocus::PathInput;
+                        }
+                    }
+                    FolderDialogAction::ClearPathInput => {
+                        if let Some(state) = &mut self.folder_dialog {
+                            state.focus = FolderDialogFocus::PathInput;
+                            state.path_input.clear();
+                            state.status_message = None;
+                        }
+                    }
+                    FolderDialogAction::JumpToPath(path) => {
+                        if let Some(state) = &mut self.folder_dialog {
+                            state.focus = FolderDialogFocus::FolderList;
+                            state.enter_directory(path);
+                        }
+                    }
+                    FolderDialogAction::ToggleHidden => {
+                        if let Some(state) = &mut self.folder_dialog {
+                            state.show_hidden = !state.show_hidden;
+                            state.refresh_entries();
+                        }
+                    }
+                    FolderDialogAction::OpenEntry(idx) => {
+                        if let Some(state) = &mut self.folder_dialog {
+                            state.focus = FolderDialogFocus::FolderList;
+                            state.selected_idx = idx;
+                            state.open_selected_entry();
+                        }
+                    }
+                    FolderDialogAction::ClickEntry(idx) => {
+                        if let Some(state) = &mut self.folder_dialog {
+                            let is_parent = state
+                                .entries
+                                .get(idx)
+                                .map(|e| e.is_parent)
+                                .unwrap_or(false);
+                            if is_parent
+                                || (state.focus == FolderDialogFocus::FolderList
+                                    && state.selected_idx == idx)
+                            {
+                                state.focus = FolderDialogFocus::FolderList;
+                                state.selected_idx = idx;
+                                state.open_selected_entry();
+                            } else {
+                                state.focus = FolderDialogFocus::FolderList;
+                                state.select_index(idx);
+                            }
+                        }
+                    }
+                    FolderDialogAction::OpenSelected => {
+                        if let Some(state) = &mut self.folder_dialog {
+                            state.focus = FolderDialogFocus::FolderList;
+                            state.open_selected_entry();
+                        }
+                    }
+                    FolderDialogAction::ConfirmAdd => {
+                        self.confirm_folder_dialog();
+                    }
+                    FolderDialogAction::Cancel => {
+                        self.folder_dialog = None;
+                    }
+                }
+            }
+            return;
+        }
+
+        // 3. Playlist Dialog click
         for t in &self.last_dialog_targets {
             if is_inside(t.rect, x, y) {
                 if t.is_cancel_button {
@@ -1464,8 +1737,12 @@ impl App {
             }
         }
 
-        // 3. Header clicks
+        // 4. Header clicks
         if let Some(hdr) = &self.last_header_targets {
+            if is_inside(hdr.logo_rect, x, y) {
+                self.show_about = true;
+                return;
+            }
             if is_inside(hdr.help_rect, x, y) {
                 self.show_help = true;
                 return;
@@ -1481,7 +1758,7 @@ impl App {
             }
         }
 
-        // 4. Player bar controls click
+        // 5. Player bar controls click
         for t in &self.last_player_targets {
             if is_inside(t.rect, x, y) {
                 self.focus = FocusArea::PlayerBar;
@@ -1519,7 +1796,7 @@ impl App {
             }
         }
 
-        // 5. Sidebar clicks
+        // 6. Sidebar clicks
         for t in &self.last_sidebar_targets {
             if is_inside(t.rect, x, y) {
                 match &t.item {
@@ -1546,7 +1823,7 @@ impl App {
             }
         }
 
-        // 6. Main View Clicks
+        // 7. Main View Clicks
         match self.view_mode {
             ViewMode::Songs => {
                 for t in &self.last_songs_targets {
@@ -1743,8 +2020,7 @@ impl App {
                                     self.is_entering_folder = false;
                                     self.new_folder_input.clear();
                                 } else {
-                                    self.is_entering_folder = true;
-                                    self.new_folder_input.clear();
+                                    self.open_folder_dialog(FolderDialogFocus::PathInput);
                                 }
                             }
                             SettingsAction::RemoveFolder(idx) => {
@@ -1836,6 +2112,11 @@ impl App {
     }
 
     fn handle_mouse_scroll(&mut self, is_up: bool, x: u16, y: u16) {
+        if let Some(state) = &mut self.folder_dialog {
+            state.scroll_by(is_up);
+            return;
+        }
+
         // Check if mouse is hovering over player volume
         for t in &self.last_player_targets {
             if is_inside(t.rect, x, y) {
@@ -1848,7 +2129,7 @@ impl App {
         }
 
         let vis_0 = self.visible_main_rows(0);
-        let vis_2 = self.visible_main_rows(2);
+        let vis_2 = self.visible_main_rows(1);
         let ma = self.last_main_area;
 
         // Scroll only the scroll depth (scroll_offset) of the hovered pane without modifying selection

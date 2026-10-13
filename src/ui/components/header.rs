@@ -2,7 +2,7 @@ use crate::ui::theme::OmarchyTheme;
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
 use ratatui::style::{Modifier, Style};
-use ratatui::widgets::{Block, Borders, Widget};
+use ratatui::widgets::{Block, BorderType, Borders, Widget};
 
 pub struct HeaderComponent<'a> {
     pub view_title: &'a str,
@@ -13,6 +13,7 @@ pub struct HeaderComponent<'a> {
 }
 
 pub struct HeaderClickTarget {
+    pub logo_rect: Rect,
     pub search_rect: Rect,
     pub help_rect: Rect,
 }
@@ -23,46 +24,61 @@ impl<'a> HeaderComponent<'a> {
         area: Rect,
         buf: &mut Buffer,
     ) -> HeaderClickTarget {
+        let border_style = if self.is_searching {
+            self.theme.block_focus_style()
+        } else {
+            self.theme.block_style()
+        };
+
         let block = Block::default()
-            .borders(Borders::BOTTOM)
-            .border_style(self.theme.block_style())
+            .borders(Borders::ALL)
+            .border_type(BorderType::Rounded)
+            .border_style(border_style)
             .style(Style::default().bg(self.theme.dark_background));
 
+        let inner = block.inner(area);
         block.render(area, buf);
 
-        // Fill background
-        for y in area.top()..area.bottom() {
-            for x in area.left()..area.right() {
-                buf[(x, y)].set_bg(self.theme.dark_background);
-            }
+        if inner.width == 0 || inner.height == 0 {
+            return HeaderClickTarget {
+                logo_rect: Rect::default(),
+                search_rect: Rect::default(),
+                help_rect: Rect::default(),
+            };
         }
 
-        let y = area.top();
+        let y = inner.top();
 
-        // Logo
+        // Logo (clickable to open About modal)
         let logo = " ♬ OmaFLAC";
+        let logo_w = logo.chars().count() as u16;
+        let logo_rect = Rect::new(inner.left(), area.top(), logo_w + 2, area.height);
         buf.set_string(
-            area.left(),
+            inner.left(),
             y,
             logo,
             Style::default().fg(self.theme.accent).add_modifier(Modifier::BOLD),
         );
 
-        let x = area.left() + logo.len() as u16 + 2;
+        let x = inner.left() + logo_w + 2;
 
         // View breadcrumb
         let breadcrumb = format!("│  {}", self.view_title);
-        buf.set_string(
-            x,
-            y,
-            &breadcrumb,
-            Style::default().fg(self.theme.light_foreground),
-        );
+        let breadcrumb_w = breadcrumb.chars().count() as u16;
+        if x + breadcrumb_w <= inner.right() {
+            buf.set_string(
+                x,
+                y,
+                &breadcrumb,
+                Style::default().fg(self.theme.light_foreground),
+            );
+        }
 
         // Right side: Help button & Search bar
         let help_text = "[? Help] ";
-        let help_x = area.right().saturating_sub(help_text.len() as u16);
-        let help_rect = Rect::new(help_x, y, help_text.len() as u16, 1);
+        let help_w = help_text.chars().count() as u16;
+        let help_x = inner.right().saturating_sub(help_w);
+        let help_rect = Rect::new(help_x, y, help_w, 1);
         buf.set_string(
             help_x,
             y,
@@ -75,7 +91,7 @@ impl<'a> HeaderComponent<'a> {
         let search_x = help_x.saturating_sub(search_box_width + 2);
         let search_rect = Rect::new(search_x, y, search_box_width, 1);
 
-        if search_x > x + breadcrumb.len() as u16 + 2 {
+        if search_x > x + breadcrumb_w + 2 {
             let (search_str, search_style) = if self.is_searching {
                 (
                     format!(" ⌕ {}█", self.search_query),
@@ -101,6 +117,7 @@ impl<'a> HeaderComponent<'a> {
         }
 
         HeaderClickTarget {
+            logo_rect,
             search_rect,
             help_rect,
         }

@@ -124,14 +124,17 @@ impl<'a> FileBrowserView<'a> {
             return targets;
         }
 
-        let rows_avail = inner.height as usize;
+        let top_pad = 1u16.min(inner.height);
+        let content_top = inner.top() + top_pad;
+        let avail_h = inner.height.saturating_sub(top_pad);
+        let rows_avail = avail_h as usize;
         let max_scroll = self.items.len().saturating_sub(rows_avail);
         let start_idx = self.scroll_offset.min(max_scroll);
         let end_idx = (start_idx + rows_avail).min(self.items.len());
 
         for (i, item) in self.items[start_idx..end_idx].iter().enumerate() {
             let actual_idx = start_idx + i;
-            let y = inner.top() + i as u16;
+            let y = content_top + i as u16;
             let is_sel = actual_idx == self.selected_index;
 
             let row_rect = Rect::new(inner.left(), y, inner.width, 1);
@@ -163,8 +166,8 @@ impl<'a> FileBrowserView<'a> {
         self.theme.render_scrollbar(
             buf,
             area,
-            inner.top(),
-            inner.height,
+            content_top,
+            avail_h,
             start_idx,
             rows_avail,
             self.items.len(),

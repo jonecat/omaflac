@@ -43,13 +43,13 @@ impl<'a> NowPlayingView<'a> {
             (
                 self.theme.block_focus_style(),
                 self.theme.focused_title_style(),
-                " ● Now Playing & Visualizer ",
+                " ● Visualizer ",
             )
         } else {
             (
                 self.theme.block_style(),
                 self.theme.unfocused_title_style(),
-                " Now Playing & Visualizer ",
+                " Visualizer ",
             )
         };
 
@@ -71,8 +71,8 @@ impl<'a> NowPlayingView<'a> {
         // Layout:
         // Top section: Artwork + Track Details (with top margin)
         // Bottom section: Real-time Spectrum visualizer + Waveform
-        let top_margin = if inner.height >= 20 { 1 } else { 0 };
-        let top_height = (inner.height * 40 / 100).max(10).min(14);
+        let top_margin = 1u16.min(inner.height);
+        let top_height = (inner.height * 40 / 100).max(10).min(15);
         let bottom_height = inner.height.saturating_sub(top_height);
 
         let top_area = Rect::new(
@@ -140,16 +140,14 @@ impl<'a> NowPlayingView<'a> {
                     dy += 1;
                 }
 
-                // Audio Quality & Format badge
+                // Audio Quality & Format info
                 dy += 1;
                 let quality = track.quality_info();
-                let badge = format!(" Hi-Res Audio  │  {} ", quality);
                 buf.set_string(
                     details_x,
                     dy,
-                    &badge,
+                    &quality,
                     Style::default()
-                        .bg(self.theme.lighter_background)
                         .fg(self.theme.cyan)
                         .add_modifier(Modifier::BOLD),
                 );

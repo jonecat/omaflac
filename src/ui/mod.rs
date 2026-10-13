@@ -7,6 +7,8 @@ pub mod views;
 pub mod waveform_widget;
 
 use crate::app::{App, FileBrowserItemTarget, FocusArea};
+use crate::ui::components::about_modal::AboutModal;
+use crate::ui::components::folder_dialog::FolderDialog;
 use crate::ui::components::header::HeaderComponent;
 use crate::ui::components::help_modal::HelpModal;
 use crate::ui::components::player_bar::PlayerBar;
@@ -46,12 +48,20 @@ pub fn render_app(frame: &mut Frame, app: &mut App) {
         }
     }
 
-    let header_height = 2u16;
-    let player_height = 6u16; // 2 border lines + 1 top padding line + 3 inner content lines
-    let center_height = area.height.saturating_sub(header_height + player_height);
+    let top_margin = 1u16;
+    let header_height = 3u16; // 2 rounded border lines + 1 inner content line
+    let player_height = 8u16; // 2 border lines + 1 top padding line + 5 inner content lines (1 info + 3 controls + 1 seekbar)
+    let center_height = area
+        .height
+        .saturating_sub(top_margin + header_height + player_height);
 
-    let header_area = Rect::new(area.left(), area.top(), area.width, header_height);
-    let center_area = Rect::new(area.left(), area.top() + header_height, area.width, center_height);
+    let header_area = Rect::new(area.left(), area.top() + top_margin, area.width, header_height);
+    let center_area = Rect::new(
+        area.left(),
+        area.top() + top_margin + header_height,
+        area.width,
+        center_height,
+    );
     let player_area = Rect::new(area.left(), area.bottom().saturating_sub(player_height), area.width, player_height);
 
     // 1. Render Header
@@ -59,7 +69,7 @@ pub fn render_app(frame: &mut Frame, app: &mut App) {
         ViewMode::Songs => "Library > Songs",
         ViewMode::Artists => "Library > Artists",
         ViewMode::Albums => "Library > Albums",
-        ViewMode::NowPlaying => "Now Playing & Visualizer",
+        ViewMode::NowPlaying => "Visualizer",
         ViewMode::Playlists => "Playlists",
         ViewMode::FileBrowser => "File Browser",
         ViewMode::Settings => "Settings",
@@ -271,8 +281,26 @@ pub fn render_app(frame: &mut Frame, app: &mut App) {
         app.last_dialog_targets = dialog.render_with_targets(area, frame.buffer_mut());
     }
 
+    app.last_folder_dialog_targets.clear();
+    if let Some(folder_state) = &mut app.folder_dialog {
+        let mut dialog = FolderDialog {
+            state: folder_state,
+            theme: &app.theme,
+        };
+        app.last_folder_dialog_targets = dialog.render_with_targets(area, frame.buffer_mut());
+    }
+
     if app.show_help {
         HelpModal::render(area, frame.buffer_mut(), &app.theme);
+    }
+
+    app.last_about_target = None;
+    if app.show_about {
+        app.last_about_target = Some(AboutModal::render_with_targets(
+            area,
+            frame.buffer_mut(),
+            &app.theme,
+        ));
     }
 }
 

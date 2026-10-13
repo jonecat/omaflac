@@ -107,7 +107,7 @@ impl<'a> PlaylistsView<'a> {
         block_right.render(right_rect, buf);
 
         // Render Left items
-        let mut y_l = inner_l.top();
+        let mut y_l = inner_l.top() + 1;
 
         // Favorites item
         let fav_rect = Rect::new(inner_l.left(), y_l, inner_l.width, 1);
@@ -190,7 +190,7 @@ impl<'a> PlaylistsView<'a> {
         // Action buttons at bottom of left pane for custom playlists
         if self.selected_playlist_id != "__favorites__" && self.selected_playlist_id != "__recent__" {
             let act_y = inner_l.bottom().saturating_sub(1);
-            if act_y > inner_l.top() + 4 {
+            if act_y > inner_l.top() + 5 {
                 let ren_w = 12u16.min(inner_l.width / 2);
                 let del_w = 12u16.min(inner_l.width.saturating_sub(ren_w + 1));
                 let ren_rect = Rect::new(inner_l.left() + 1, act_y, ren_w, 1);
@@ -230,7 +230,7 @@ impl<'a> PlaylistsView<'a> {
 
         let tracks = self.library.tracks_for_playlist(track_ids);
 
-        let y_hdr = inner_r.top();
+        let y_hdr = inner_r.top() + 1;
         let hdr_style = self.theme.muted_text().add_modifier(Modifier::BOLD);
         buf.set_string(inner_r.left(), y_hdr, "#  TITLE", hdr_style);
         let artist_x = inner_r.left() + (inner_r.width as f32 * 0.45) as u16;
@@ -238,7 +238,7 @@ impl<'a> PlaylistsView<'a> {
         let time_x = inner_r.right().saturating_sub(8);
         buf.set_string(time_x, y_hdr, "TIME", hdr_style);
 
-        let rows_avail = inner_r.height.saturating_sub(1) as usize;
+        let rows_avail = inner_r.height.saturating_sub(2) as usize;
         let start_idx = self.scroll_track_offset.min(tracks.len().saturating_sub(rows_avail));
 
         for (i, track) in tracks.iter().skip(start_idx).take(rows_avail).enumerate() {
@@ -294,7 +294,7 @@ impl<'a> PlaylistsView<'a> {
             buf,
             right_rect,
             y_hdr + 1,
-            inner_r.height.saturating_sub(1),
+            inner_r.height.saturating_sub(2),
             start_idx,
             rows_avail,
             tracks.len(),

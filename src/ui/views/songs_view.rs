@@ -66,8 +66,8 @@ impl<'a> SongsView<'a> {
             }
         }
 
-        // Header row
-        let y_hdr = inner.top();
+        // Header row (with 1-row top margin below section border)
+        let y_hdr = inner.top() + 1;
         let header_rect = Rect::new(inner.left(), y_hdr, inner.width, 1);
         targets.push(SongsViewClickTarget {
             rect: header_rect,
@@ -102,7 +102,7 @@ impl<'a> SongsView<'a> {
         buf.set_string(col_time_x, y_hdr, "TIME", hdr_style);
         buf.set_string(col_fmt_x, y_hdr, "FORMAT", hdr_style);
 
-        let rows_available = inner.height.saturating_sub(1) as usize;
+        let rows_available = inner.height.saturating_sub(2) as usize;
         let num_tracks = self.tracks.len();
 
         let start_idx = self.scroll_offset.min(num_tracks.saturating_sub(rows_available));
@@ -183,7 +183,7 @@ impl<'a> SongsView<'a> {
             buf,
             area,
             y_hdr + 1,
-            inner.height.saturating_sub(1),
+            inner.height.saturating_sub(2),
             start_idx,
             rows_available,
             num_tracks,
