@@ -83,13 +83,8 @@ impl<'a> HeaderComponent<'a> {
         // Right side: Help button & Search bar
         let x_after_breadcrumb = x + breadcrumb_w + 2;
 
-        // 1. Help Button (Rightmost element)
-        let (help_w, is_wide_help) = if inner.width >= 75 {
-            (15u16, true)
-        } else {
-            (10u16, false)
-        };
-
+        // 1. Help Button (Rightmost element: "[ ? Help ]")
+        let help_w = 10u16;
         let help_x = inner.right().saturating_sub(help_w);
         let mut help_rect = Rect::default();
 
@@ -121,25 +116,6 @@ impl<'a> HeaderComponent<'a> {
                     .fg(self.theme.foreground)
                     .bg(self.theme.dark_background),
             );
-
-            if is_wide_help {
-                buf.set_string(
-                    help_x + 8,
-                    y,
-                    " · ",
-                    Style::default()
-                        .fg(self.theme.muted)
-                        .bg(self.theme.dark_background),
-                );
-                buf.set_string(
-                    help_x + 11,
-                    y,
-                    "F1",
-                    Style::default()
-                        .fg(self.theme.light_foreground)
-                        .bg(self.theme.dark_background),
-                );
-            }
         }
 
         // 2. Search Field (To the left of Help button)

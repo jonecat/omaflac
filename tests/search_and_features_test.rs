@@ -428,7 +428,8 @@ fn test_header_search_and_help_button_styling() {
     assert!(targets.search_rect.width > 0, "Search field target should be registered");
 
     let text_idle: String = buf.content().iter().map(|c| c.symbol()).collect();
-    assert!(text_idle.contains("? Help · F1"), "Help button should show '? Help · F1'");
+    assert!(text_idle.contains("? Help"), "Help button should show '? Help'");
+    assert!(!text_idle.contains("F1"), "Help button should not contain F1");
     assert!(text_idle.contains("⌕ Search"), "Search field should show '⌕ Search'");
     assert!(text_idle.contains('/'), "Idle search field should display '/' key hint");
 
