@@ -291,3 +291,114 @@ fn test_artist_sorting_ignores_leading_the() {
     );
 }
 
+#[test]
+fn test_multi_artist_album_unified_in_albums_and_split_in_artists() {
+    use omaflac::library::playlist::PlaylistsManager;
+    use omaflac::ui::theme::OmarchyTheme;
+    use omaflac::ui::views::albums_view::{AlbumColumn, AlbumsView};
+    use ratatui::buffer::Buffer;
+    use ratatui::layout::Rect;
+
+    let make_track = |id: &str, title: &str, artist: &str, album_artist: Option<&str>, trk_num: u32| Track {
+        id: id.into(),
+        path: PathBuf::from(format!("/music/Queen/Classic Queen/{}.flac", title)),
+        title: title.into(),
+        artist: artist.into(),
+        album: "Classic Queen".into(),
+        album_artist: album_artist.map(|s| s.into()),
+        genre: Some("Rock".into()),
+        year: Some(1992),
+        release_date: Some("1992-03-03".into()),
+        track_number: Some(trk_num),
+        disc_number: Some(1),
+        duration_secs: 240,
+        format: "FLAC".into(),
+        sample_rate: Some(44100),
+        bit_depth: Some(16),
+        bitrate_kbps: Some(900),
+        has_cover_art: true,
+        file_size: Some(25_000_000),
+        modified_secs: Some(1_700_000_000),
+    };
+
+    let mut lib = Library::default();
+    lib.upsert_tracks(vec![
+        make_track("q1", "A Kind of Magic", "Queen", Some("Queen"), 1),
+        make_track("q2", "Bohemian Rhapsody", "Queen", Some("Queen"), 2),
+        make_track("q3", "Under Pressure", "Queen & David Bowie", Some("Queen"), 3),
+        make_track("q4", "Radio Ga Ga", "Queen", Some("Queen"), 4),
+    ]);
+
+    // 1. ALBUMS VIEW VERIFICATION:
+    // "Classic Queen" must be ONE album, not two separate albums
+    let albums = lib.all_albums();
+    assert_eq!(albums.len(), 1, "Classic Queen should be consolidated into a single album");
+    assert_eq!(albums[0].album, "Classic Queen");
+    assert_eq!(albums[0].artist, "Queen");
+    assert_eq!(albums[0].track_count, 4, "All 4 tracks must be counted in Classic Queen");
+
+    // All tracks of the album must be returned in the tracklist in track number order
+    let album_tracks = lib.tracks_by_album(&albums[0].artist, &albums[0].album);
+    assert_eq!(album_tracks.len(), 4);
+    assert_eq!(album_tracks[0].title, "A Kind of Magic");
+    assert_eq!(album_tracks[1].title, "Bohemian Rhapsody");
+    assert_eq!(album_tracks[2].title, "Under Pressure");
+    assert_eq!(album_tracks[2].artist, "Queen & David Bowie");
+    assert_eq!(album_tracks[3].title, "Radio Ga Ga");
+
+    // Render AlbumsView and verify Under Pressure displays artist credit "Queen & David Bowie"
+    let pm = PlaylistsManager::default();
+    let theme = OmarchyTheme::default();
+    let view = AlbumsView {
+        library: &lib,
+        albums: &albums,
+        active_column: AlbumColumn::Songs,
+        selected_album_idx: 0,
+        selected_song_idx: 2,
+        scroll_album_offset: 0,
+        scroll_song_offset: 0,
+        playing_track_id: None,
+        playlists_manager: &pm,
+        is_focused: true,
+        theme: &theme,
+    };
+    let area = Rect::new(0, 0, 100, 20);
+    let mut buf = Buffer::empty(area);
+    view.render_with_targets(area, &mut buf);
+    let rendered: String = buf.content().iter().map(|c| c.symbol()).collect();
+    assert!(
+        rendered.contains("Under Pressure — Queen & David Bowie"),
+        "Tracklist should render guest/featured credit when song artist != album artist"
+    );
+
+    // 2. ARTIST VIEW VERIFICATION:
+    // Tracks remain split by artist in the artist view
+    let artists = lib.artists();
+    assert!(artists.contains(&"Queen".to_string()));
+    assert!(artists.contains(&"Queen & David Bowie".to_string()));
+
+    let queen_tracks = lib.tracks_by_artist_and_album("Queen", "Classic Queen");
+    assert_eq!(queen_tracks.len(), 3, "Queen solo view should have 3 tracks");
+    assert!(!queen_tracks.iter().any(|t| t.title == "Under Pressure"));
+
+    let collab_tracks = lib.tracks_by_artist_and_album("Queen & David Bowie", "Classic Queen");
+    assert_eq!(collab_tracks.len(), 1, "Queen & David Bowie view should only have Under Pressure");
+    assert_eq!(collab_tracks[0].title, "Under Pressure");
+
+    // 3. HEURISTIC MAJORITY VERIFICATION (album_artist = None):
+    let mut lib2 = Library::default();
+    lib2.upsert_tracks(vec![
+        make_track("h1", "A Kind of Magic", "Queen", None, 1),
+        make_track("h2", "Bohemian Rhapsody", "Queen", None, 2),
+        make_track("h3", "Under Pressure", "Queen & David Bowie", None, 3),
+        make_track("h4", "Radio Ga Ga", "Queen", None, 4),
+    ]);
+    let albums2 = lib2.all_albums();
+    assert_eq!(albums2.len(), 1, "Should unify even without album_artist tag via majority heuristic");
+    assert_eq!(albums2[0].artist, "Queen");
+    assert_eq!(albums2[0].track_count, 4);
+    let tracks2 = lib2.tracks_by_album(&albums2[0].artist, &albums2[0].album);
+    assert_eq!(tracks2.len(), 4);
+}
+
+

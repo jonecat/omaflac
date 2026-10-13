@@ -564,7 +564,7 @@ impl App {
             ViewMode::Albums => {
                 let albums = self.library.all_albums();
                 let album = albums.get(self.albums_selected_idx)?;
-                let songs = self.library.tracks_by_artist_and_album(&album.artist, &album.album);
+                let songs = self.library.tracks_by_album(&album.artist, &album.album);
                 songs.get(self.albums_song_idx).copied().cloned()
             }
             ViewMode::NowPlaying => self.audio.current_track(),
@@ -1453,7 +1453,7 @@ impl App {
                     AlbumColumn::Songs => {
                         let albums = self.library.all_albums();
                         if let Some(alb) = albums.get(self.albums_selected_idx) {
-                            let songs = self.library.tracks_by_artist_and_album(&alb.artist, &alb.album);
+                            let songs = self.library.tracks_by_album(&alb.artist, &alb.album);
                             if !songs.is_empty() {
                                 self.albums_song_idx = (self.albums_song_idx + 1).min(songs.len() - 1);
                                 Self::sync_scroll(self.albums_song_idx, &mut self.albums_song_scroll_offset, vis_0);
@@ -1466,7 +1466,7 @@ impl App {
                     if let Some(alb) = albums.get(self.albums_selected_idx) {
                         let songs: Vec<Track> = self
                             .library
-                            .tracks_by_artist_and_album(&alb.artist, &alb.album)
+                            .tracks_by_album(&alb.artist, &alb.album)
                             .into_iter()
                             .cloned()
                             .collect();
@@ -1657,7 +1657,7 @@ impl App {
                         SearchSection::Albums => {
                             let albums = self.library.search_albums(&self.search_query);
                             if let Some(alb) = albums.get(self.search_album_idx) {
-                                let songs: Vec<Track> = self.library.tracks_by_artist_and_album(&alb.artist, &alb.album).into_iter().cloned().collect();
+                                let songs: Vec<Track> = self.library.tracks_by_album(&alb.artist, &alb.album).into_iter().cloned().collect();
                                 self.play_queue_at(songs, 0);
                             }
                         }
@@ -2067,7 +2067,7 @@ impl App {
                                     if let Some(alb) = albums.get(t.item_index) {
                                         let songs: Vec<Track> = self
                                             .library
-                                            .tracks_by_artist_and_album(&alb.artist, &alb.album)
+                                            .tracks_by_album(&alb.artist, &alb.album)
                                             .into_iter()
                                             .cloned()
                                             .collect();
@@ -2085,7 +2085,7 @@ impl App {
                                     if let Some(alb) = albums.get(self.albums_selected_idx) {
                                         let songs: Vec<Track> = self
                                             .library
-                                            .tracks_by_artist_and_album(&alb.artist, &alb.album)
+                                            .tracks_by_album(&alb.artist, &alb.album)
                                             .into_iter()
                                             .cloned()
                                             .collect();
@@ -2252,7 +2252,7 @@ impl App {
                                 if prev_sec == SearchSection::Albums && self.search_album_idx == t.item_index {
                                     let albums = self.library.search_albums(&self.search_query);
                                     if let Some(alb) = albums.get(t.item_index) {
-                                        let songs: Vec<Track> = self.library.tracks_by_artist_and_album(&alb.artist, &alb.album).into_iter().cloned().collect();
+                                        let songs: Vec<Track> = self.library.tracks_by_album(&alb.artist, &alb.album).into_iter().cloned().collect();
                                         self.play_queue_at(songs, 0);
                                     }
                                 } else {
@@ -2392,7 +2392,7 @@ impl App {
                         let albums = self.library.all_albums();
                         let count = albums
                             .get(self.albums_selected_idx)
-                            .map(|alb| self.library.tracks_by_artist_and_album(&alb.artist, &alb.album).len())
+                            .map(|alb| self.library.tracks_by_album(&alb.artist, &alb.album).len())
                             .unwrap_or(0);
                         Self::scroll_pane(is_up, &mut self.albums_song_scroll_offset, count, vis_0);
                     }
@@ -2523,7 +2523,7 @@ impl App {
             .map(|a| (a.artist.clone(), a.album.clone()));
         let cur_album_song_id = cur_album_key.as_ref().and_then(|(art, alb)| {
             self.library
-                .tracks_by_artist_and_album(art, alb)
+                .tracks_by_album(art, alb)
                 .get(self.albums_song_idx)
                 .map(|t| t.id.clone())
         });
@@ -2609,7 +2609,7 @@ impl App {
             if let Some(sel_alb) = new_albums.get(self.albums_selected_idx) {
                 let new_songs = self
                     .library
-                    .tracks_by_artist_and_album(&sel_alb.artist, &sel_alb.album);
+                    .tracks_by_album(&sel_alb.artist, &sel_alb.album);
                 if new_songs.is_empty() {
                     self.albums_song_idx = 0;
                 } else if let Some(song_id) = &cur_album_song_id {

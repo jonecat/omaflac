@@ -62,7 +62,7 @@ impl<'a> AlbumsView<'a> {
 
         let current_album = self.albums.get(self.selected_album_idx);
         let songs: Vec<&Track> = if let Some(alb) = current_album {
-            self.library.tracks_by_artist_and_album(&alb.artist, &alb.album)
+            self.library.tracks_by_album(&alb.artist, &alb.album)
         } else {
             Vec::new()
         };
@@ -280,7 +280,16 @@ impl<'a> AlbumsView<'a> {
                 .width
                 .saturating_sub(prefix_chars + duration_str.len() as u16 + 3)
                 as usize;
-            let title: String = song.display_title().chars().take(title_avail).collect();
+            let display_title = if let Some(alb) = current_album {
+                if !song.display_artist().eq_ignore_ascii_case(&alb.artist) {
+                    format!("{} — {}", song.display_title(), song.display_artist())
+                } else {
+                    song.display_title().to_string()
+                }
+            } else {
+                song.display_title().to_string()
+            };
+            let title: String = display_title.chars().take(title_avail).collect();
 
             let line = format!("{}{}", prefix, title);
             buf.set_string(inner.left(), y, &line, style);

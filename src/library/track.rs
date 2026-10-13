@@ -48,6 +48,16 @@ impl Track {
         }
     }
 
+    pub fn display_album_artist(&self) -> &str {
+        if let Some(ref aa) = self.album_artist {
+            let trimmed = aa.trim();
+            if !trimmed.is_empty() {
+                return trimmed;
+            }
+        }
+        self.display_artist()
+    }
+
     pub fn display_album(&self) -> &str {
         if self.album.is_empty() {
             "Unknown Album"

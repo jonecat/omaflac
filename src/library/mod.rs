@@ -4,7 +4,7 @@ pub mod track;
 
 use scanner::Scanner;
 use serde::{Deserialize, Serialize};
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeSet, HashMap};
 use std::path::{Path, PathBuf};
 use track::Track;
 
@@ -181,34 +181,111 @@ impl Library {
             .collect()
     }
 
-    pub fn all_albums(&self) -> Vec<AlbumSummary> {
-        let mut map: BTreeMap<(String, String), (usize, u64, Option<u32>, bool)> = BTreeMap::new();
-        for track in &self.tracks {
-            let key = (track.display_artist().to_string(), track.display_album().to_string());
-            let entry = map.entry(key).or_insert((0, 0, track.year, track.has_cover_art));
-            entry.0 += 1;
-            entry.1 += track.duration_secs;
-            if entry.2.is_none() && track.year.is_some() {
-                entry.2 = track.year;
-            }
-            if track.has_cover_art {
-                entry.3 = true;
+    /// Determines the album artist for a track using explicit tags and smart heuristics.
+    pub fn track_album_artist(&self, track: &Track) -> String {
+        // 1. Direct explicit album_artist on this track
+        if let Some(ref aa) = track.album_artist {
+            let trimmed = aa.trim();
+            if !trimmed.is_empty() {
+                return trimmed.to_string();
             }
         }
 
-        let mut albums: Vec<AlbumSummary> = map
-            .into_iter()
-            .map(|((artist, album), (track_count, total_duration_secs, year, has_cover_art))| {
-                AlbumSummary {
-                    artist,
-                    album,
-                    track_count,
-                    total_duration_secs,
-                    year,
-                    has_cover_art,
+        // 2. Check sibling tracks sharing the same parent directory (or matching artist)
+        // that have an explicit album_artist for this album
+        for sibling in &self.tracks {
+            let same_dir = match (track.path.parent(), sibling.path.parent()) {
+                (Some(p1), Some(p2)) => p1 == p2,
+                _ => false,
+            };
+            let same_artist = sibling.display_artist().eq_ignore_ascii_case(track.display_artist());
+            if (same_dir || same_artist) && sibling.display_album().eq_ignore_ascii_case(track.display_album()) {
+                if let Some(ref aa) = sibling.album_artist {
+                    let trimmed = aa.trim();
+                    if !trimmed.is_empty() {
+                        return trimmed.to_string();
+                    }
                 }
-            })
-            .collect();
+            }
+        }
+
+        // 3. Majority artist heuristic on tracks of the same album
+        let album_tracks: Vec<&Track> = {
+            let by_dir: Vec<&Track> = self
+                .tracks
+                .iter()
+                .filter(|t| {
+                    if !t.display_album().eq_ignore_ascii_case(track.display_album()) {
+                        return false;
+                    }
+                    match (track.path.parent(), t.path.parent()) {
+                        (Some(p1), Some(p2)) => p1 == p2 || p1.parent() == p2.parent(),
+                        _ => false,
+                    }
+                })
+                .collect();
+            if !by_dir.is_empty() {
+                by_dir
+            } else {
+                self.tracks
+                    .iter()
+                    .filter(|t| t.display_album().eq_ignore_ascii_case(track.display_album()))
+                    .collect()
+            }
+        };
+
+        if !album_tracks.is_empty() {
+            let mut counts: HashMap<&str, usize> = HashMap::new();
+            for t in &album_tracks {
+                *counts.entry(t.display_artist()).or_insert(0) += 1;
+            }
+            if let Some((&majority_artist, &count)) = counts.iter().max_by_key(|(_, &c)| c) {
+                if count * 2 >= album_tracks.len() {
+                    return majority_artist.to_string();
+                }
+            }
+            // If multiple diverse artists and at least 3 tracks, treat as "Various Artists"
+            if counts.len() >= 3 {
+                return "Various Artists".to_string();
+            }
+        }
+
+        // 4. Fallback to track's own display_artist
+        track.display_artist().to_string()
+    }
+
+    pub fn all_albums(&self) -> Vec<AlbumSummary> {
+        let mut albums: Vec<AlbumSummary> = Vec::new();
+        let mut key_index: HashMap<(String, String), usize> = HashMap::new();
+
+        for track in &self.tracks {
+            let album_artist = self.track_album_artist(track);
+            let album_name = track.display_album();
+            let key = (album_artist.to_lowercase(), album_name.to_lowercase());
+
+            if let Some(&idx) = key_index.get(&key) {
+                let existing = &mut albums[idx];
+                existing.track_count += 1;
+                existing.total_duration_secs += track.duration_secs;
+                if existing.year.is_none() && track.year.is_some() {
+                    existing.year = track.year;
+                }
+                if track.has_cover_art {
+                    existing.has_cover_art = true;
+                }
+            } else {
+                let idx = albums.len();
+                key_index.insert(key, idx);
+                albums.push(AlbumSummary {
+                    artist: album_artist,
+                    album: album_name.to_string(),
+                    track_count: 1,
+                    total_duration_secs: track.duration_secs,
+                    year: track.year,
+                    has_cover_art: track.has_cover_art,
+                });
+            }
+        }
 
         albums.sort_by(|a, b| {
             Self::compare_artist_names(&a.artist, &b.artist)
@@ -217,6 +294,37 @@ impl Library {
         });
 
         albums
+    }
+
+    pub fn tracks_by_album(&self, album_artist: &str, album: &str) -> Vec<&Track> {
+        let mut tracks: Vec<&Track> = self
+            .tracks
+            .iter()
+            .filter(|t| {
+                if !t.display_album().eq_ignore_ascii_case(album) {
+                    return false;
+                }
+                let resolved_aa = self.track_album_artist(t);
+                resolved_aa.eq_ignore_ascii_case(album_artist)
+                    || t.display_artist().eq_ignore_ascii_case(album_artist)
+                    || t.album_artist.as_deref().map(|aa| aa.trim().eq_ignore_ascii_case(album_artist)).unwrap_or(false)
+            })
+            .collect();
+
+        tracks.sort_by(|a, b| {
+            a.disc_number
+                .unwrap_or(1)
+                .cmp(&b.disc_number.unwrap_or(1))
+                .then_with(|| {
+                    a.track_number
+                        .unwrap_or(u32::MAX)
+                        .cmp(&b.track_number.unwrap_or(u32::MAX))
+                })
+                .then_with(|| a.title.to_lowercase().cmp(&b.title.to_lowercase()))
+                .then_with(|| a.title.cmp(&b.title))
+        });
+
+        tracks
     }
 
     pub fn search(&self, query: &str) -> Vec<&Track> {
