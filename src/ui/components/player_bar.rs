@@ -14,7 +14,6 @@ use std::time::Duration;
 pub enum PlayerAction {
     Previous,
     TogglePlayPause,
-    Stop,
     Next,
     ToggleRepeat,
     ToggleShuffle,
@@ -224,15 +223,10 @@ impl<'a> PlayerBar<'a> {
         label: &str,
         fg_style: Style,
         border_style: Style,
-        is_highlighted: bool,
     ) -> Rect {
         let label_chars = label.chars().count() as u16;
         let width = label_chars + 4; // "│ " + label + " │"
-        let bg_color = if is_highlighted {
-            self.theme.selection
-        } else {
-            self.theme.background
-        };
+        let bg_color = self.theme.background;
 
         if btn_h >= 3 {
             let rect = Rect::new(x, y, width, 3);
@@ -288,7 +282,6 @@ impl<'a> PlayerBar<'a> {
             "|◀",
             normal_ctrl_style,
             subtle_border,
-            false,
         );
         targets.push(PlayerClickTarget {
             rect: prev_rect,
@@ -307,7 +300,6 @@ impl<'a> PlayerBar<'a> {
             play_sym,
             active_ctrl_style,
             if is_playing { active_border } else { subtle_border },
-            is_playing,
         );
         targets.push(PlayerClickTarget {
             rect: play_rect,
@@ -315,24 +307,7 @@ impl<'a> PlayerBar<'a> {
         });
         x += play_rect.width + 1;
 
-        // 3. Stop: ╭─────╮ / │  ■  │ / ╰─────╯
-        let stop_rect = self.render_button_cap(
-            buf,
-            x,
-            y,
-            btn_h,
-            " ■ ",
-            normal_ctrl_style,
-            subtle_border,
-            false,
-        );
-        targets.push(PlayerClickTarget {
-            rect: stop_rect,
-            action: PlayerAction::Stop,
-        });
-        x += stop_rect.width + 1;
-
-        // 4. Next: ╭────╮ / │ ▶| │ / ╰────╯
+        // 3. Next: ╭────╮ / │ ▶| │ / ╰────╯
         let next_rect = self.render_button_cap(
             buf,
             x,
@@ -341,7 +316,6 @@ impl<'a> PlayerBar<'a> {
             "▶|",
             normal_ctrl_style,
             subtle_border,
-            false,
         );
         targets.push(PlayerClickTarget {
             rect: next_rect,
@@ -358,7 +332,6 @@ impl<'a> PlayerBar<'a> {
             " ⇄ ",
             if self.shuffle { active_ctrl_style } else { muted_ctrl_style },
             if self.shuffle { active_border } else { subtle_border },
-            self.shuffle,
         );
         targets.push(PlayerClickTarget {
             rect: shuf_rect,
@@ -381,7 +354,6 @@ impl<'a> PlayerBar<'a> {
             rep_inner,
             if rep_active { active_ctrl_style } else { muted_ctrl_style },
             if rep_active { active_border } else { subtle_border },
-            rep_active,
         );
         targets.push(PlayerClickTarget {
             rect: rep_rect,
@@ -416,7 +388,6 @@ impl<'a> PlayerBar<'a> {
                 v_icon,
                 v_style,
                 v_border,
-                is_muted,
             );
             targets.push(PlayerClickTarget {
                 rect: vol_btn_rect,

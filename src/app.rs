@@ -1003,8 +1003,6 @@ impl App {
             KeyCode::Char('s') => {
                 if self.view_mode == ViewMode::Settings {
                     self.trigger_scan();
-                } else {
-                    self.audio.stop();
                 }
                 return;
             }
@@ -1911,7 +1909,6 @@ impl App {
                 match t.action {
                     PlayerAction::Previous => self.prev_track(),
                     PlayerAction::TogglePlayPause => self.audio.toggle_pause(),
-                    PlayerAction::Stop => self.audio.stop(),
                     PlayerAction::Next => self.next_track(),
                     PlayerAction::ToggleRepeat => {
                         self.config.repeat_mode = self.config.repeat_mode.next();
