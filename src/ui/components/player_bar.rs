@@ -99,7 +99,7 @@ impl<'a> PlayerBar<'a> {
 
         // Render small album artwork thumbnail on the left if space permits
         let content_rect = if inner.width >= 40 && avail_h >= 2 {
-            let thumb_h = avail_h.min(3);
+            let thumb_h = avail_h.min(5);
             let thumb_w = self.artwork_cache.thumb_width_for_height(thumb_h);
             let left_pad = 1;
             let thumb_rect = Rect::new(inner.left() + left_pad, content_top, thumb_w, thumb_h);
@@ -122,27 +122,35 @@ impl<'a> PlayerBar<'a> {
         };
 
         // Layout rows depending on avail_h:
-        // avail_h >= 3:
+        // avail_h >= 5:
         //   Row 0: Track info & audio format/quality badge
-        //   Row 1: Large controls & buttons (Prev, Play, Stop, Next, Shuffle, Repeat, Volume)
-        //   Row 2: Elapsed time, full waveform seekbar, total time
-        if avail_h >= 3 {
+        //   Rows 1..=3: 3-row tall rounded-corner transport buttons & volume
+        //   Row 4: Elapsed time, progress seekbar, total time
+        if avail_h >= 5 {
+            let y_info = content_top;
+            let y_ctrl = content_top + 1;
+            let y_wave = content_top + 4;
+
+            self.render_row_info(content_rect, y_info, buf);
+            self.render_row_controls(content_rect, y_ctrl, 3, buf, &mut targets);
+            self.render_row_waveform(content_rect, y_wave, buf, &mut targets);
+        } else if avail_h >= 3 {
             let y_info = content_top;
             let y_ctrl = content_top + 1;
             let y_wave = content_top + 2;
 
             self.render_row_info(content_rect, y_info, buf);
-            self.render_row_controls(content_rect, y_ctrl, buf, &mut targets);
+            self.render_row_controls(content_rect, y_ctrl, 1, buf, &mut targets);
             self.render_row_waveform(content_rect, y_wave, buf, &mut targets);
         } else if avail_h == 2 {
             let y_ctrl = content_top;
             let y_wave = content_top + 1;
 
-            self.render_row_controls(content_rect, y_ctrl, buf, &mut targets);
+            self.render_row_controls(content_rect, y_ctrl, 1, buf, &mut targets);
             self.render_row_waveform(content_rect, y_wave, buf, &mut targets);
         } else if avail_h >= 1 {
             let y_ctrl = content_top;
-            self.render_row_controls(content_rect, y_ctrl, buf, &mut targets);
+            self.render_row_controls(content_rect, y_ctrl, 1, buf, &mut targets);
         }
 
         targets
@@ -207,105 +215,174 @@ impl<'a> PlayerBar<'a> {
         }
     }
 
-    /// Row 1: Large bracketed monochromatic controls
+    fn render_button_cap(
+        &self,
+        buf: &mut Buffer,
+        x: u16,
+        y: u16,
+        btn_h: u16,
+        label: &str,
+        fg_style: Style,
+        border_style: Style,
+        is_highlighted: bool,
+    ) -> Rect {
+        let label_chars = label.chars().count() as u16;
+        let width = label_chars + 4; // "│ " + label + " │"
+        let bg_color = if is_highlighted {
+            self.theme.lighter_background
+        } else {
+            self.theme.dark_background
+        };
+
+        if btn_h >= 3 {
+            let rect = Rect::new(x, y, width, 3);
+            for row in y..y + 3 {
+                for col in x..x + width {
+                    buf[(col, row)].set_bg(bg_color);
+                }
+            }
+            let block = Block::default()
+                .borders(Borders::ALL)
+                .border_type(BorderType::Rounded)
+                .border_style(border_style.bg(bg_color))
+                .style(Style::default().bg(bg_color));
+            block.render(rect, buf);
+            buf.set_string(x + 2, y + 1, label, fg_style.bg(bg_color));
+            rect
+        } else {
+            let rect = Rect::new(x, y, width, 1);
+            buf.set_string(x, y, "[ ", border_style);
+            buf.set_string(x + 2, y, label, fg_style);
+            buf.set_string(x + 2 + label_chars, y, " ]", border_style);
+            rect
+        }
+    }
+
+    /// Transport & mode controls (3-row tall rounded button caps when btn_h == 3)
     fn render_row_controls(
         &self,
         inner: Rect,
         y: u16,
+        btn_h: u16,
         buf: &mut Buffer,
         targets: &mut Vec<PlayerClickTarget>,
     ) {
         let mut x = inner.left() + 1;
 
-        // Button styles
-        let bracket_style = Style::default().fg(self.theme.muted);
+        let subtle_border = self.theme.block_style();
+        let active_border = self.theme.block_focus_style();
         let active_ctrl_style = Style::default()
             .fg(self.theme.accent)
             .add_modifier(Modifier::BOLD);
-        let normal_ctrl_style = Style::default().fg(self.theme.foreground);
+        let normal_ctrl_style = Style::default()
+            .fg(self.theme.bright_foreground)
+            .add_modifier(Modifier::BOLD);
+        let muted_ctrl_style = Style::default().fg(self.theme.muted);
 
-        // [ |◀ ] Previous (width 6)
-        let prev_btn = "[ |◀ ]";
-        let prev_w = prev_btn.len() as u16;
-        let prev_rect = Rect::new(x, y, prev_w, 1);
-        buf.set_string(x, y, "[ ", bracket_style);
-        buf.set_string(x + 2, y, "|◀", normal_ctrl_style);
-        buf.set_string(x + 4, y, " ]", bracket_style);
+        // 1. Previous: ╭────╮ / │ |◀ │ / ╰────╯
+        let prev_rect = self.render_button_cap(
+            buf,
+            x,
+            y,
+            btn_h,
+            "|◀",
+            normal_ctrl_style,
+            subtle_border,
+            false,
+        );
         targets.push(PlayerClickTarget {
             rect: prev_rect,
             action: PlayerAction::Previous,
         });
-        x += prev_w + 1;
+        x += prev_rect.width + 1;
 
-        // [  ▶  ] / [  ⏸  ] Play / Pause (width 7)
-        let play_rect = Rect::new(x, y, 7, 1);
-        buf.set_string(x, y, "[  ", bracket_style);
-        let (sym, sym_style) = match self.playback_state {
-            PlaybackState::Playing => ("⏸", active_ctrl_style),
-            PlaybackState::Paused | PlaybackState::Stopped => ("▶", active_ctrl_style),
-        };
-        buf.set_string(x + 3, y, sym, sym_style);
-        buf.set_string(x + 4, y, "  ]", bracket_style);
+        // 2. Play / Pause: ╭─────╮ / │  ▶  │ / ╰─────╯
+        let is_playing = self.playback_state == PlaybackState::Playing;
+        let play_sym = if is_playing { " ⏸ " } else { " ▶ " };
+        let play_rect = self.render_button_cap(
+            buf,
+            x,
+            y,
+            btn_h,
+            play_sym,
+            active_ctrl_style,
+            if is_playing { active_border } else { subtle_border },
+            is_playing,
+        );
         targets.push(PlayerClickTarget {
             rect: play_rect,
             action: PlayerAction::TogglePlayPause,
         });
-        x += 7 + 1;
+        x += play_rect.width + 1;
 
-        // [  ■  ] Stop (width 7)
-        let stop_rect = Rect::new(x, y, 7, 1);
-        buf.set_string(x, y, "[  ", bracket_style);
-        buf.set_string(x + 3, y, "■", normal_ctrl_style);
-        buf.set_string(x + 4, y, "  ]", bracket_style);
+        // 3. Stop: ╭─────╮ / │  ■  │ / ╰─────╯
+        let stop_rect = self.render_button_cap(
+            buf,
+            x,
+            y,
+            btn_h,
+            " ■ ",
+            normal_ctrl_style,
+            subtle_border,
+            false,
+        );
         targets.push(PlayerClickTarget {
             rect: stop_rect,
             action: PlayerAction::Stop,
         });
-        x += 7 + 1;
+        x += stop_rect.width + 1;
 
-        // [ ▶| ] Next (width 6)
-        let next_btn = "[ ▶| ]";
-        let next_w = next_btn.len() as u16;
-        let next_rect = Rect::new(x, y, next_w, 1);
-        buf.set_string(x, y, "[ ", bracket_style);
-        buf.set_string(x + 2, y, "▶|", normal_ctrl_style);
-        buf.set_string(x + 4, y, " ]", bracket_style);
+        // 4. Next: ╭────╮ / │ ▶| │ / ╰────╯
+        let next_rect = self.render_button_cap(
+            buf,
+            x,
+            y,
+            btn_h,
+            "▶|",
+            normal_ctrl_style,
+            subtle_border,
+            false,
+        );
         targets.push(PlayerClickTarget {
             rect: next_rect,
             action: PlayerAction::Next,
         });
-        x += next_w + 3;
+        x += next_rect.width + 2;
 
-        // Middle / Modes: Shuffle & Repeat
-        // [ ⇄ ] Shuffle (width 5)
-        let shuf_rect = Rect::new(x, y, 5, 1);
-        let shuf_style = if self.shuffle {
-            active_ctrl_style
-        } else {
-            Style::default().fg(self.theme.muted)
-        };
-        buf.set_string(x, y, "[ ", bracket_style);
-        buf.set_string(x + 2, y, "⇄", shuf_style);
-        buf.set_string(x + 3, y, " ]", bracket_style);
+        // 5. Shuffle: ╭────╮ / │ ⇄  │ / ╰────╯
+        let shuf_rect = self.render_button_cap(
+            buf,
+            x,
+            y,
+            btn_h,
+            "⇄ ",
+            if self.shuffle { active_ctrl_style } else { muted_ctrl_style },
+            if self.shuffle { active_border } else { subtle_border },
+            self.shuffle,
+        );
         targets.push(PlayerClickTarget {
             rect: shuf_rect,
             action: PlayerAction::ToggleShuffle,
         });
-        x += 5 + 1;
+        x += shuf_rect.width + 1;
 
-        // Repeat button: [ ↻ ] / [ ↻ All ] / [ ↻ 1 ]
-        let (rep_label, rep_len) = match self.repeat_mode {
-            RepeatMode::Off => ("[ ↻ ]", 5u16),
-            RepeatMode::All => ("[ ↻ All ]", 9u16),
-            RepeatMode::Track => ("[ ↻ 1 ]", 7u16),
+        // 6. Repeat: ╭────╮ / │ ↻  │ / ╰────╯
+        let rep_inner = match self.repeat_mode {
+            RepeatMode::Off => "↻ ",
+            RepeatMode::All => "↻  All",
+            RepeatMode::Track => "↻  1",
         };
-        let rep_rect = Rect::new(x, y, rep_len, 1);
-        let rep_style = if self.repeat_mode != RepeatMode::Off {
-            active_ctrl_style
-        } else {
-            Style::default().fg(self.theme.muted)
-        };
-        buf.set_string(x, y, rep_label, rep_style);
+        let rep_active = self.repeat_mode != RepeatMode::Off;
+        let rep_rect = self.render_button_cap(
+            buf,
+            x,
+            y,
+            btn_h,
+            rep_inner,
+            if rep_active { active_ctrl_style } else { muted_ctrl_style },
+            if rep_active { active_border } else { subtle_border },
+            rep_active,
+        );
         targets.push(PlayerClickTarget {
             rect: rep_rect,
             action: PlayerAction::ToggleRepeat,
@@ -315,28 +392,39 @@ impl<'a> PlayerBar<'a> {
         let right_margin = inner.right().saturating_sub(1);
         let vol_slider_len = 10u16;
         let pct_width = 5u16;
-        let btn_width = 5u16; // "[ ♪ ]" or "[ ✕ ]"
+        let btn_width = 5u16; // ╭───╮ / │ ♪ │ / ╰───╯
         let total_vol_width = btn_width + 1 + vol_slider_len + 1 + pct_width;
 
-        if right_margin > inner.left() + total_vol_width + 30 {
+        if right_margin > x + rep_rect.width + total_vol_width + 2 {
             let vol_start_x = right_margin.saturating_sub(total_vol_width);
-
-            // Mute / Volume icon button [ ♪ ] / [ ✕ ]
-            let vol_btn_rect = Rect::new(vol_start_x, y, btn_width, 1);
-            let (v_icon, v_style) = if self.is_muted || self.volume <= 0.01 {
-                ("✕", Style::default().fg(self.theme.accent).add_modifier(Modifier::BOLD))
+            let is_muted = self.is_muted || self.volume <= 0.01;
+            let (v_icon, v_style, v_border) = if is_muted {
+                (
+                    "✕",
+                    Style::default().fg(self.theme.accent).add_modifier(Modifier::BOLD),
+                    active_border,
+                )
             } else {
-                ("♪", normal_ctrl_style)
+                ("♪", normal_ctrl_style, subtle_border)
             };
-            buf.set_string(vol_start_x, y, "[ ", bracket_style);
-            buf.set_string(vol_start_x + 2, y, v_icon, v_style);
-            buf.set_string(vol_start_x + 3, y, " ]", bracket_style);
+
+            let vol_btn_rect = self.render_button_cap(
+                buf,
+                vol_start_x,
+                y,
+                btn_h,
+                v_icon,
+                v_style,
+                v_border,
+                is_muted,
+            );
             targets.push(PlayerClickTarget {
                 rect: vol_btn_rect,
                 action: PlayerAction::ToggleMute,
             });
 
-            // Slider
+            // Slider (vertically centered with the button cap)
+            let slider_y = y + btn_h / 2;
             let slider_x = vol_start_x + btn_width + 1;
             let effective_vol = if self.is_muted { 0.0 } else { self.volume };
             let vol_head = ((effective_vol.min(1.0) * vol_slider_len as f32).round() as u16).min(vol_slider_len);
@@ -354,11 +442,11 @@ impl<'a> PlayerBar<'a> {
                 } else {
                     Style::default().fg(self.theme.muted)
                 };
-                buf.set_string(slider_x + i, y, sym, style);
+                buf.set_string(slider_x + i, slider_y, sym, style);
             }
 
             targets.push(PlayerClickTarget {
-                rect: Rect::new(slider_x, y, vol_slider_len, 1),
+                rect: Rect::new(slider_x, y, vol_slider_len, btn_h),
                 action: PlayerAction::SetVolume(self.volume),
             });
 
@@ -366,7 +454,7 @@ impl<'a> PlayerBar<'a> {
             let pct_text = format!("{:>3}%", (effective_vol * 100.0).round() as u32);
             buf.set_string(
                 slider_x + vol_slider_len + 1,
-                y,
+                slider_y,
                 &pct_text,
                 Style::default().fg(self.theme.light_foreground),
             );

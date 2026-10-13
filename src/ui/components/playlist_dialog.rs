@@ -72,7 +72,7 @@ impl<'a> PlaylistDialog<'a> {
 
         match self.mode {
             PlaylistDialogMode::SelectPlaylist { selected_idx } => {
-                let mut line_y = inner.top();
+                let mut line_y = inner.top() + 1;
                 if let Some(track) = self.track {
                     let track_label = format!("Track: {} — {}", track.display_title(), track.display_artist());
                     let trunc_track: String = track_label.chars().take(inner.width as usize).collect();

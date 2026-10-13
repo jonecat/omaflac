@@ -72,7 +72,7 @@ impl<'a> SettingsView<'a> {
             return targets;
         }
 
-        let mut y = inner.top();
+        let mut y = inner.top() + 1;
 
         // Section: Library Folders
         buf.set_string(
@@ -131,7 +131,7 @@ impl<'a> SettingsView<'a> {
         }
 
         y += 1;
-        // Add Folder input & buttons
+        // Add Folder input & button
         if self.is_entering_folder {
             buf.set_string(inner.left(), y, "Enter directory path: ", self.theme.primary_text());
             y += 1;
@@ -152,7 +152,14 @@ impl<'a> SettingsView<'a> {
             y += 2;
         } else {
             let add_rect = Rect::new(inner.left(), y, 18, 1);
-            buf.set_string(inner.left(), y, " + [Add Folder...]", Style::default().fg(self.theme.cyan).add_modifier(Modifier::BOLD));
+            buf.set_string(
+                inner.left(),
+                y,
+                " + [Add Folder...]",
+                Style::default()
+                    .fg(self.theme.cyan)
+                    .add_modifier(Modifier::BOLD),
+            );
             targets.push(SettingsClickTarget {
                 rect: add_rect,
                 action: SettingsAction::AddFolder,
@@ -179,7 +186,7 @@ impl<'a> SettingsView<'a> {
 
         y += 3;
         // Section: System & Audio Info
-        if y < inner.bottom().saturating_sub(4) {
+        if y < inner.bottom().saturating_sub(3) {
             buf.set_string(
                 inner.left(),
                 y,
@@ -190,14 +197,7 @@ impl<'a> SettingsView<'a> {
             buf.set_string(
                 inner.left(),
                 y,
-                &format!("• Omarchy Global Theme: {} ({})", self.theme.name, if self.theme.is_dark { "dark" } else { "light" }),
-                self.theme.secondary_text(),
-            );
-            y += 1;
-            buf.set_string(
-                inner.left(),
-                y,
-                "• Audio Engine: Symphonia (Bit-perfect multi-format decoder) + CPAL (ALSA / PipeWire)",
+                "• Audio Engine: Symphonia (Bit-perfect multi-format decoder) + CPAL",
                 self.theme.secondary_text(),
             );
             y += 1;

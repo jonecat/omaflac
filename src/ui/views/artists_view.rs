@@ -105,12 +105,15 @@ impl<'a> ArtistsView<'a> {
         let inner1 = block1.inner(col1_rect);
         block1.render(col1_rect, buf);
 
-        let rows1 = inner1.height as usize;
+        let top_pad = 1u16.min(inner1.height);
+        let content_top1 = inner1.top() + top_pad;
+        let avail_h1 = inner1.height.saturating_sub(top_pad);
+        let rows1 = avail_h1 as usize;
         let offset1 = self.scroll_artist_offset.min(artists.len().saturating_sub(rows1));
 
         for (i, artist) in artists.iter().skip(offset1).take(rows1).enumerate() {
             let actual_idx = offset1 + i;
-            let y = inner1.top() + i as u16;
+            let y = content_top1 + i as u16;
             let is_sel = actual_idx == self.selected_artist_idx;
 
             let row_rect = Rect::new(inner1.left(), y, inner1.width, 1);
@@ -138,8 +141,8 @@ impl<'a> ArtistsView<'a> {
         self.theme.render_scrollbar(
             buf,
             col1_rect,
-            inner1.top(),
-            inner1.height,
+            content_top1,
+            avail_h1,
             offset1,
             rows1,
             artists.len(),
@@ -170,12 +173,15 @@ impl<'a> ArtistsView<'a> {
         let inner2 = block2.inner(col2_rect);
         block2.render(col2_rect, buf);
 
-        let rows2 = inner2.height as usize;
+        let top_pad2 = 1u16.min(inner2.height);
+        let content_top2 = inner2.top() + top_pad2;
+        let avail_h2 = inner2.height.saturating_sub(top_pad2);
+        let rows2 = avail_h2 as usize;
         let offset2 = self.scroll_album_offset.min(albums.len().saturating_sub(rows2));
 
         for (i, album) in albums.iter().skip(offset2).take(rows2).enumerate() {
             let actual_idx = offset2 + i;
-            let y = inner2.top() + i as u16;
+            let y = content_top2 + i as u16;
             let is_sel = actual_idx == self.selected_album_idx;
 
             let row_rect = Rect::new(inner2.left(), y, inner2.width, 1);
@@ -203,8 +209,8 @@ impl<'a> ArtistsView<'a> {
         self.theme.render_scrollbar(
             buf,
             col2_rect,
-            inner2.top(),
-            inner2.height,
+            content_top2,
+            avail_h2,
             offset2,
             rows2,
             albums.len(),
@@ -235,12 +241,15 @@ impl<'a> ArtistsView<'a> {
         let inner3 = block3.inner(col3_rect);
         block3.render(col3_rect, buf);
 
-        let rows3 = inner3.height as usize;
+        let top_pad3 = 1u16.min(inner3.height);
+        let content_top3 = inner3.top() + top_pad3;
+        let avail_h3 = inner3.height.saturating_sub(top_pad3);
+        let rows3 = avail_h3 as usize;
         let offset3 = self.scroll_song_offset.min(songs.len().saturating_sub(rows3));
 
         for (i, song) in songs.iter().skip(offset3).take(rows3).enumerate() {
             let actual_idx = offset3 + i;
-            let y = inner3.top() + i as u16;
+            let y = content_top3 + i as u16;
             let is_sel = actual_idx == self.selected_song_idx;
             let is_playing = self.playing_track_id == Some(&song.id);
             let is_fav = self.playlists_manager.is_favorite(&song.id);
@@ -288,8 +297,8 @@ impl<'a> ArtistsView<'a> {
         self.theme.render_scrollbar(
             buf,
             col3_rect,
-            inner3.top(),
-            inner3.height,
+            content_top3,
+            avail_h3,
             offset3,
             rows3,
             songs.len(),

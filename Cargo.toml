@@ -21,7 +21,7 @@ anyhow = "1.0"
 unicode-width = "0.2"
 rand = "0.8"
 crossbeam-channel = "0.5"
-ratatui-image = "11.1.0"
+ratatui-image = { version = "11.1.0", default-features = false, features = ["image-defaults", "crossterm"] }
 
 [profile.release]
 opt-level = 3

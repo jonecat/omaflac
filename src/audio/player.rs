@@ -524,6 +524,8 @@ impl PlayerWorker {
         let mut is_eof = false;
 
         let mut resample_ratio: f64 = 1.0;
+        let mut resample_pos: f64 = 0.0;
+        let mut resample_prev_frame: Option<(f32, f32)> = None;
         let mut active_preload_cancel: Option<Arc<AtomicBool>> = None;
 
         let mut queued_next_track: Option<Track> = None;
@@ -569,6 +571,8 @@ impl PlayerWorker {
                                 active_track_sample_rate = preloaded.sample_rate;
                                 active_track_channels = preloaded.channels;
                                 resample_ratio = preloaded.sample_rate as f64 / sample_rate as f64;
+                                resample_pos = 0.0;
+                                resample_prev_frame = None;
                                 sample_buf = None;
 
                                 if let Ok(mut cur) = self.current_track.lock() {
@@ -682,6 +686,8 @@ impl PlayerWorker {
                         is_stream_paused.store(true, Ordering::SeqCst);
                         while audio_rx_worker.try_recv().is_ok() {}
                         sample_buf = None;
+                        resample_pos = 0.0;
+                        resample_prev_frame = None;
                         self.visualizer.clear();
                         if let Ok(mut st) = self.state.lock() {
                             *st = PlaybackState::Stopped;
@@ -700,6 +706,8 @@ impl PlayerWorker {
                                 is_prebuffering = true;
                                 is_eof = false;
                                 sample_buf = None;
+                                resample_pos = 0.0;
+                                resample_prev_frame = None;
                                 self.visualizer.clear();
                                 let actual_secs = seeked.actual_ts as f64 / active_track_sample_rate as f64;
                                 self.elapsed_nanos.store((actual_secs * 1_000_000_000.0) as u64, Ordering::SeqCst);
@@ -724,6 +732,8 @@ impl PlayerWorker {
                                 is_prebuffering = true;
                                 is_eof = false;
                                 sample_buf = None;
+                                resample_pos = 0.0;
+                                resample_prev_frame = None;
                                 self.visualizer.clear();
                                 let actual_secs = seeked.actual_ts as f64 / active_track_sample_rate as f64;
                                 self.elapsed_nanos.store((actual_secs * 1_000_000_000.0) as u64, Ordering::SeqCst);
@@ -819,6 +829,8 @@ impl PlayerWorker {
                         active_track_sample_rate = next.sample_rate;
                         active_track_channels = next.channels;
                         resample_ratio = next.sample_rate as f64 / sample_rate as f64;
+                        resample_pos = 0.0;
+                        resample_prev_frame = None;
                         sample_buf = None;
                         is_eof = false;
 
@@ -867,8 +879,21 @@ impl PlayerWorker {
                 }
             };
 
-            if sample_buf.is_none() {
-                let spec = *decoded.spec();
+            let spec = *decoded.spec();
+            if spec.rate > 0 && spec.rate != active_track_sample_rate {
+                active_track_sample_rate = spec.rate;
+                resample_ratio = active_track_sample_rate as f64 / sample_rate as f64;
+            }
+            let spec_channels = spec.channels.count();
+            if spec_channels > 0 && spec_channels != active_track_channels {
+                active_track_channels = spec_channels;
+            }
+
+            if sample_buf
+                .as_ref()
+                .map(|b| b.capacity() < decoded.capacity() * spec_channels.max(1))
+                .unwrap_or(true)
+            {
                 let duration = decoded.capacity() as u64;
                 sample_buf = Some(SampleBuffer::new(duration, spec));
             }
@@ -880,7 +905,7 @@ impl PlayerWorker {
             let current_vol = self.volume.lock().map(|v| *v).unwrap_or(0.8);
             let in_channels = active_track_channels.max(1);
 
-            // Channel adapt and push to ring buffer
+            // Channel adapt, resample if needed, and push to ring buffer
             if (resample_ratio - 1.0).abs() < 0.001 && in_channels == channels {
                 for &s in samples {
                     let out_s = s * current_vol;
@@ -888,24 +913,52 @@ impl PlayerWorker {
                 }
             } else {
                 let num_frames = samples.len() / in_channels;
-                for frame_idx in 0..num_frames {
-                    let s_left = samples[frame_idx * in_channels];
-                    let s_right = if in_channels > 1 {
-                        samples[frame_idx * in_channels + 1]
-                    } else {
-                        s_left
+                if num_frames > 0 {
+                    let read_frame = |f_idx: usize| -> (f32, f32) {
+                        let base = f_idx * in_channels;
+                        let l = samples[base];
+                        let r = if in_channels > 1 {
+                            samples[base + 1]
+                        } else {
+                            l
+                        };
+                        (l, r)
                     };
 
-                    let out_left = s_left * current_vol;
-                    let out_right = s_right * current_vol;
+                    while resample_pos < (num_frames - 1) as f64 {
+                        let idx0 = resample_pos.floor() as isize;
+                        let frac = (resample_pos - (idx0 as f64)) as f32;
 
-                    if channels == 1 {
-                        let mono = (out_left + out_right) * 0.5;
-                        audio_tx.send(AudioItem::Sample(mono)).ok();
-                    } else {
-                        audio_tx.send(AudioItem::Sample(out_left)).ok();
-                        audio_tx.send(AudioItem::Sample(out_right)).ok();
+                        let (l0, r0) = if idx0 < 0 {
+                            resample_prev_frame.unwrap_or_else(|| read_frame(0))
+                        } else {
+                            read_frame(idx0 as usize)
+                        };
+                        let idx1 = (idx0 + 1).clamp(0, (num_frames - 1) as isize) as usize;
+                        let (l1, r1) = read_frame(idx1);
+
+                        let s_left = l0 + (l1 - l0) * frac;
+                        let s_right = r0 + (r1 - r0) * frac;
+
+                        let out_left = s_left * current_vol;
+                        let out_right = s_right * current_vol;
+
+                        if channels == 1 {
+                            let mono = (out_left + out_right) * 0.5;
+                            audio_tx.send(AudioItem::Sample(mono)).ok();
+                        } else {
+                            audio_tx.send(AudioItem::Sample(out_left)).ok();
+                            audio_tx.send(AudioItem::Sample(out_right)).ok();
+                            for _ in 2..channels {
+                                audio_tx.send(AudioItem::Sample(0.0)).ok();
+                            }
+                        }
+
+                        resample_pos += resample_ratio;
                     }
+
+                    resample_prev_frame = Some(read_frame(num_frames - 1));
+                    resample_pos -= num_frames as f64;
                 }
             }
         }

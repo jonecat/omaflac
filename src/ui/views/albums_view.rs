@@ -123,13 +123,16 @@ impl<'a> AlbumsView<'a> {
             return targets;
         }
 
-        let max_rows = inner.height as usize;
+        let top_pad = 1u16.min(inner.height);
+        let content_top = inner.top() + top_pad;
+        let avail_h = inner.height.saturating_sub(top_pad);
+        let max_rows = avail_h as usize;
         let start = self.scroll_album_offset.min(self.albums.len().saturating_sub(max_rows));
         let visible_albums = &self.albums[start..];
 
         for (i, album) in visible_albums.iter().enumerate().take(max_rows) {
             let actual_idx = start + i;
-            let y = inner.top() + i as u16;
+            let y = content_top + i as u16;
             let is_selected = actual_idx == self.selected_album_idx;
 
             let row_rect = Rect::new(inner.left(), y, inner.width, 1);
@@ -165,8 +168,8 @@ impl<'a> AlbumsView<'a> {
         self.theme.render_scrollbar(
             buf,
             area,
-            inner.top(),
-            inner.height,
+            content_top,
+            avail_h,
             start,
             max_rows,
             self.albums.len(),
@@ -228,13 +231,16 @@ impl<'a> AlbumsView<'a> {
             return targets;
         }
 
-        let max_rows = inner.height as usize;
+        let top_pad = 1u16.min(inner.height);
+        let content_top = inner.top() + top_pad;
+        let avail_h = inner.height.saturating_sub(top_pad);
+        let max_rows = avail_h as usize;
         let start = self.scroll_song_offset.min(songs.len().saturating_sub(max_rows));
         let visible_songs = &songs[start..];
 
         for (i, song) in visible_songs.iter().enumerate().take(max_rows) {
             let actual_idx = start + i;
-            let y = inner.top() + i as u16;
+            let y = content_top + i as u16;
             let is_sel = actual_idx == self.selected_song_idx;
             let is_playing = self.playing_track_id == Some(&song.id);
             let is_fav = self.playlists_manager.is_favorite(&song.id);
@@ -285,8 +291,8 @@ impl<'a> AlbumsView<'a> {
         self.theme.render_scrollbar(
             buf,
             area,
-            inner.top(),
-            inner.height,
+            content_top,
+            avail_h,
             start,
             max_rows,
             songs.len(),

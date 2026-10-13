@@ -63,7 +63,7 @@ impl<'a> SidebarComponent<'a> {
         ));
         items.push((
             SidebarItem::View(ViewMode::NowPlaying),
-            " ∿ Now Playing".to_string(),
+            " ∿ Visualizer".to_string(),
             self.current_view == ViewMode::NowPlaying,
         ));
 
@@ -118,13 +118,13 @@ impl<'a> SidebarComponent<'a> {
             (
                 self.theme.block_focus_style(),
                 self.theme.focused_title_style(),
-                " ● Library ",
+                " ● Navigation ",
             )
         } else {
             (
                 self.theme.block_style(),
                 self.theme.unfocused_title_style(),
-                " Library ",
+                " Navigation ",
             )
         };
 
@@ -150,7 +150,7 @@ impl<'a> SidebarComponent<'a> {
             }
         }
 
-        let mut y = inner.top();
+        let mut y = inner.top() + 1;
         let items = self.build_items();
 
         let mut item_idx = 0;
