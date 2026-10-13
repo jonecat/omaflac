@@ -193,7 +193,7 @@ impl<'a> NowPlayingView<'a> {
                     wave_rect.top(),
                     &badge,
                     Style::default()
-                        .bg(self.theme.dark_background)
+                        .bg(self.theme.background)
                         .fg(self.theme.cyan)
                         .add_modifier(Modifier::BOLD),
                 );

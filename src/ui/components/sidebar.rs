@@ -132,7 +132,7 @@ impl<'a> SidebarComponent<'a> {
             .borders(Borders::ALL)
             .border_type(BorderType::Rounded)
             .border_style(border_style)
-            .style(Style::default().bg(self.theme.dark_background))
+            .style(Style::default().bg(self.theme.background))
             .title(title_text)
             .title_style(title_style);
 
@@ -146,7 +146,7 @@ impl<'a> SidebarComponent<'a> {
         // Fill background
         for y in inner.top()..inner.bottom() {
             for x in inner.left()..inner.right() {
-                buf[(x, y)].set_bg(self.theme.dark_background);
+                buf[(x, y)].set_bg(self.theme.background);
             }
         }
 
@@ -174,7 +174,7 @@ impl<'a> SidebarComponent<'a> {
             let style = if *is_active {
                 self.theme.selected_row()
             } else if is_cursor {
-                Style::default().bg(self.theme.lighter_background).fg(self.theme.bright_foreground).add_modifier(Modifier::BOLD)
+                Style::default().bg(self.theme.selection).fg(self.theme.bright_foreground).add_modifier(Modifier::BOLD)
             } else {
                 Style::default().fg(self.theme.foreground)
             };
@@ -216,7 +216,7 @@ impl<'a> SidebarComponent<'a> {
             let style = if *is_active {
                 self.theme.selected_row()
             } else if is_cursor {
-                Style::default().bg(self.theme.lighter_background).fg(self.theme.bright_foreground).add_modifier(Modifier::BOLD)
+                Style::default().bg(self.theme.selection).fg(self.theme.bright_foreground).add_modifier(Modifier::BOLD)
             } else {
                 Style::default().fg(self.theme.foreground)
             };
@@ -255,7 +255,7 @@ impl<'a> SidebarComponent<'a> {
                 let style = if *is_active {
                     self.theme.selected_row()
                 } else if is_cursor {
-                    Style::default().bg(self.theme.lighter_background).fg(self.theme.bright_foreground).add_modifier(Modifier::BOLD)
+                    Style::default().bg(self.theme.selection).fg(self.theme.bright_foreground).add_modifier(Modifier::BOLD)
                 } else {
                     Style::default().fg(self.theme.foreground)
                 };

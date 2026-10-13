@@ -278,7 +278,7 @@ impl OmarchyTheme {
     pub fn focused_title_style(&self) -> Style {
         Style::default()
             .bg(self.accent)
-            .fg(self.dark_background)
+            .fg(self.background)
             .add_modifier(Modifier::BOLD)
     }
 
@@ -287,7 +287,7 @@ impl OmarchyTheme {
     }
 
     pub fn card_style(&self) -> Style {
-        Style::default().bg(self.lighter_background).fg(self.foreground)
+        Style::default().bg(self.selection).fg(self.foreground)
     }
 
     /// Render a btop-style scrollbar along the right border of a pane when `total_items > visible_rows`.

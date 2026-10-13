@@ -38,7 +38,7 @@ impl<'a> HeaderComponent<'a> {
             .borders(Borders::ALL)
             .border_type(BorderType::Rounded)
             .border_style(border_style)
-            .style(Style::default().bg(self.theme.dark_background));
+            .style(Style::default().bg(self.theme.background));
 
         let inner = block.inner(area);
         block.render(area, buf);
@@ -98,25 +98,31 @@ impl<'a> HeaderComponent<'a> {
         let search_rect = Rect::new(search_x, y, search_box_width, 1);
 
         if search_x > x + breadcrumb_w + 2 {
+            let search_bg = if self.is_searching || !self.search_query.is_empty() {
+                self.theme.selection
+            } else {
+                self.theme.background
+            };
+
             let (search_str, search_style) = if self.is_searching {
                 (
                     format!(" ⌕ {}█", self.search_query),
-                    Style::default().bg(self.theme.lighter_background).fg(self.theme.accent).add_modifier(Modifier::BOLD),
+                    Style::default().bg(search_bg).fg(self.theme.accent).add_modifier(Modifier::BOLD),
                 )
             } else if !self.search_query.is_empty() {
                 (
                     format!(" ⌕ {} [/]", self.search_query),
-                    Style::default().bg(self.theme.lighter_background).fg(self.theme.foreground),
+                    Style::default().bg(search_bg).fg(self.theme.foreground),
                 )
             } else {
                 (
                     " ⌕ Search [/]...".to_string(),
-                    Style::default().bg(self.theme.lighter_background).fg(self.theme.muted),
+                    Style::default().bg(search_bg).fg(self.theme.muted),
                 )
             };
 
             for col in 0..search_box_width {
-                buf[(search_x + col, y)].set_bg(self.theme.lighter_background);
+                buf[(search_x + col, y)].set_bg(search_bg);
             }
             let truncated: String = search_str.chars().take(search_box_width as usize).collect();
             buf.set_string(search_x, y, &truncated, search_style);

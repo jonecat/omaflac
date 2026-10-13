@@ -56,7 +56,7 @@ impl<'a> PlaylistDialog<'a> {
             .borders(Borders::ALL)
             .border_type(BorderType::Rounded)
             .border_style(self.theme.block_focus_style())
-            .style(Style::default().bg(self.theme.lighter_background))
+            .style(Style::default().bg(self.theme.background))
             .title(title)
             .title_style(self.theme.accent_text());
 
@@ -66,7 +66,7 @@ impl<'a> PlaylistDialog<'a> {
         // Fill background
         for my in inner.top()..inner.bottom() {
             for mx in inner.left()..inner.right() {
-                buf[(mx, my)].set_bg(self.theme.lighter_background);
+                buf[(mx, my)].set_bg(self.theme.background);
             }
         }
 
@@ -138,7 +138,7 @@ impl<'a> PlaylistDialog<'a> {
                 let input_y = line_y + 2;
                 let input_rect = Rect::new(inner.left(), input_y, inner.width, 1);
                 for mx in input_rect.left()..input_rect.right() {
-                    buf[(mx, input_y)].set_bg(self.theme.dark_background);
+                    buf[(mx, input_y)].set_bg(self.theme.selection);
                 }
                 let input_str = format!(" {}█", name_input);
                 buf.set_string(inner.left(), input_y, &input_str, self.theme.accent_text());
@@ -169,7 +169,7 @@ impl<'a> PlaylistDialog<'a> {
                 let input_y = line_y + 2;
                 let input_rect = Rect::new(inner.left(), input_y, inner.width, 1);
                 for mx in input_rect.left()..input_rect.right() {
-                    buf[(mx, input_y)].set_bg(self.theme.dark_background);
+                    buf[(mx, input_y)].set_bg(self.theme.selection);
                 }
                 let input_str = format!(" {}█", name_input);
                 buf.set_string(inner.left(), input_y, &input_str, self.theme.accent_text());

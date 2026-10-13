@@ -143,7 +143,7 @@ impl<'a> SettingsView<'a> {
             y += 1;
             let input_rect = Rect::new(inner.left() + 1, y, inner.width.saturating_sub(17), 1);
             for x in input_rect.left()..input_rect.right() {
-                buf[(x, y)].set_bg(self.theme.lighter_background);
+                buf[(x, y)].set_bg(self.theme.selection);
             }
             let input_text = format!(" {}█", self.new_folder_input);
             buf.set_string(inner.left() + 1, y, &input_text, self.theme.accent_text());

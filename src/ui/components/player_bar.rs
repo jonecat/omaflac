@@ -75,7 +75,7 @@ impl<'a> PlayerBar<'a> {
             .borders(Borders::ALL)
             .border_type(BorderType::Rounded)
             .border_style(border_style)
-            .style(Style::default().bg(self.theme.dark_background))
+            .style(Style::default().bg(self.theme.background))
             .title(title_text)
             .title_style(title_style);
 
@@ -89,7 +89,7 @@ impl<'a> PlayerBar<'a> {
         // Fill background of inner area
         for y in inner.top()..inner.bottom() {
             for x in inner.left()..inner.right() {
-                buf[(x, y)].set_bg(self.theme.dark_background);
+                buf[(x, y)].set_bg(self.theme.background);
             }
         }
 
@@ -229,9 +229,9 @@ impl<'a> PlayerBar<'a> {
         let label_chars = label.chars().count() as u16;
         let width = label_chars + 4; // "│ " + label + " │"
         let bg_color = if is_highlighted {
-            self.theme.lighter_background
+            self.theme.selection
         } else {
-            self.theme.dark_background
+            self.theme.background
         };
 
         if btn_h >= 3 {

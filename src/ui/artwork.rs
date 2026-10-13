@@ -244,7 +244,7 @@ impl<'a> Widget for ArtworkWidget<'a> {
 
         let bg_color = self
             .theme
-            .map(|t| t.dark_background)
+            .map(|t| t.background)
             .unwrap_or(Color::Rgb(20, 24, 45));
 
         let accent_color = self

@@ -48,21 +48,25 @@ pub fn render_app(frame: &mut Frame, app: &mut App) {
         }
     }
 
-    let top_margin = 1u16;
     let header_height = 3u16; // 2 rounded border lines + 1 inner content line
     let player_height = 8u16; // 2 border lines + 1 top padding line + 5 inner content lines (1 info + 3 controls + 1 seekbar)
     let center_height = area
         .height
-        .saturating_sub(top_margin + header_height + player_height);
+        .saturating_sub(header_height + player_height);
 
-    let header_area = Rect::new(area.left(), area.top() + top_margin, area.width, header_height);
+    let header_area = Rect::new(area.left(), area.top(), area.width, header_height);
     let center_area = Rect::new(
         area.left(),
-        area.top() + top_margin + header_height,
+        area.top() + header_height,
         area.width,
         center_height,
     );
-    let player_area = Rect::new(area.left(), area.bottom().saturating_sub(player_height), area.width, player_height);
+    let player_area = Rect::new(
+        area.left(),
+        area.top() + header_height + center_height,
+        area.width,
+        player_height,
+    );
 
     // 1. Render Header
     let view_title = match app.view_mode {
@@ -351,7 +355,7 @@ fn render_initial_loading(frame: &mut Frame, app: &App) {
         .borders(Borders::ALL)
         .border_type(BorderType::Rounded)
         .border_style(app.theme.block_focus_style())
-        .style(Style::default().bg(app.theme.dark_background))
+        .style(Style::default().bg(app.theme.background))
         .title(" ● OmaFLAC Audiophile Player ")
         .title_style(app.theme.focused_title_style());
 

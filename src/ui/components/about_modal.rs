@@ -47,7 +47,7 @@ impl AboutModal {
 
         for my in modal_rect.top()..modal_rect.bottom() {
             for mx in modal_rect.left()..modal_rect.right() {
-                buf[(mx, my)].set_bg(theme.dark_background);
+                buf[(mx, my)].set_bg(theme.background);
             }
         }
 
@@ -55,7 +55,7 @@ impl AboutModal {
             .borders(Borders::ALL)
             .border_type(BorderType::Rounded)
             .border_style(theme.block_focus_style())
-            .style(Style::default().bg(theme.dark_background))
+            .style(Style::default().bg(theme.background))
             .title(" ● About OmaFLAC ")
             .title_style(theme.focused_title_style());
 
@@ -81,11 +81,11 @@ impl AboutModal {
             let logo_x = inner.left() + (inner.width.saturating_sub(logo_w)) / 2;
             let oma_style = Style::default()
                 .fg(theme.accent)
-                .bg(theme.dark_background)
+                .bg(theme.background)
                 .add_modifier(Modifier::BOLD);
             let flac_style = Style::default()
                 .fg(theme.cyan)
-                .bg(theme.dark_background)
+                .bg(theme.background)
                 .add_modifier(Modifier::BOLD);
 
             for i in 0..6 {
@@ -165,14 +165,14 @@ impl AboutModal {
             close_rect = Rect::new(btn_x, cur_y, btn_w, 3);
             for by in cur_y..cur_y + 3 {
                 for bx in btn_x..btn_x + btn_w {
-                    buf[(bx, by)].set_bg(theme.lighter_background);
+                    buf[(bx, by)].set_bg(theme.selection);
                 }
             }
             let btn_block = Block::default()
                 .borders(Borders::ALL)
                 .border_type(BorderType::Rounded)
-                .border_style(theme.block_focus_style().bg(theme.lighter_background))
-                .style(Style::default().bg(theme.lighter_background));
+                .border_style(theme.block_focus_style().bg(theme.selection))
+                .style(Style::default().bg(theme.selection));
             btn_block.render(close_rect, buf);
             buf.set_string(
                 btn_x + 2,
@@ -180,7 +180,7 @@ impl AboutModal {
                 btn_label,
                 Style::default()
                     .fg(theme.accent)
-                    .bg(theme.lighter_background)
+                    .bg(theme.selection)
                     .add_modifier(Modifier::BOLD),
             );
         } else if cur_y < inner.bottom() {

@@ -21,7 +21,7 @@ impl HelpModal {
             .borders(Borders::ALL)
             .border_type(BorderType::Rounded)
             .border_style(theme.block_focus_style())
-            .style(Style::default().bg(theme.lighter_background))
+            .style(Style::default().bg(theme.background))
             .title(" OmaFLAC Controls ")
             .title_style(theme.accent_text());
 
@@ -29,7 +29,7 @@ impl HelpModal {
 
         for my in modal_rect.top()..modal_rect.bottom() {
             for mx in modal_rect.left()..modal_rect.right() {
-                buf[(mx, my)].set_bg(theme.lighter_background);
+                buf[(mx, my)].set_bg(theme.background);
             }
         }
         block.render(modal_rect, buf);

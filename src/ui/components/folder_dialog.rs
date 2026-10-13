@@ -249,9 +249,9 @@ impl<'a> FolderDialog<'a> {
         let label_chars = label.chars().count() as u16;
         let width = label_chars + 4;
         let bg_color = if is_highlighted {
-            self.theme.lighter_background
+            self.theme.selection
         } else {
-            self.theme.dark_background
+            self.theme.background
         };
 
         if btn_h >= 3 {
@@ -374,16 +374,21 @@ impl<'a> FolderDialog<'a> {
         } else {
             self.theme.block_style()
         };
+        let input_bg = if is_input_focused {
+            self.theme.selection
+        } else {
+            self.theme.background
+        };
         for iy in input_box_rect.top()..input_box_rect.bottom() {
             for ix in input_box_rect.left()..input_box_rect.right() {
-                buf[(ix, iy)].set_bg(self.theme.dark_background);
+                buf[(ix, iy)].set_bg(input_bg);
             }
         }
         let input_block = Block::default()
             .borders(Borders::ALL)
             .border_type(BorderType::Rounded)
             .border_style(input_border_style)
-            .style(Style::default().bg(self.theme.dark_background));
+            .style(Style::default().bg(input_bg));
         let input_inner = input_block.inner(input_box_rect);
         input_block.render(input_box_rect, buf);
 
@@ -406,7 +411,7 @@ impl<'a> FolderDialog<'a> {
             &display_input,
             Style::default()
                 .fg(self.theme.bright_foreground)
-                .bg(self.theme.dark_background)
+                .bg(input_bg)
                 .add_modifier(Modifier::BOLD),
         );
         targets.push(FolderDialogClickTarget {
@@ -527,7 +532,7 @@ impl<'a> FolderDialog<'a> {
             .borders(Borders::ALL)
             .border_type(BorderType::Rounded)
             .border_style(exp_border)
-            .style(Style::default().bg(self.theme.dark_background))
+            .style(Style::default().bg(self.theme.background))
             .title(exp_title)
             .title_style(exp_title_style);
         let exp_inner = exp_block.inner(explorer_rect);
@@ -535,7 +540,7 @@ impl<'a> FolderDialog<'a> {
 
         for ey in exp_inner.top()..exp_inner.bottom() {
             for ex in exp_inner.left()..exp_inner.right() {
-                buf[(ex, ey)].set_bg(self.theme.dark_background);
+                buf[(ex, ey)].set_bg(self.theme.background);
             }
         }
 
