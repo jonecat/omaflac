@@ -243,3 +243,51 @@ fn test_incremental_sync_and_offline_mount_protection() {
     );
 }
 
+#[test]
+fn test_artist_sorting_ignores_leading_the() {
+    let mut lib = create_sample_library(); // Has "Pink Floyd" and "Radiohead"
+    let make_track = |id: &str, artist: &str, album: &str, title: &str| Track {
+        id: id.into(),
+        path: PathBuf::from(format!("/music/{}/{}.flac", id, title)),
+        title: title.into(),
+        artist: artist.into(),
+        album: album.into(),
+        album_artist: Some(artist.into()),
+        genre: None,
+        year: None,
+        release_date: None,
+        track_number: Some(1),
+        disc_number: Some(1),
+        duration_secs: 200,
+        format: "FLAC".into(),
+        sample_rate: Some(44100),
+        bit_depth: Some(16),
+        bitrate_kbps: None,
+        has_cover_art: false,
+        file_size: None,
+        modified_secs: None,
+    };
+
+    lib.upsert_tracks(vec![
+        make_track("10", "The Beatles", "Abbey Road", "Come Together"),
+        make_track("11", "The White Stripes", "Elephant", "Seven Nation Army"),
+        make_track("12", "Beach Boys", "Pet Sounds", "Wouldn't It Be Nice"),
+        make_track("13", "Beck", "Odelay", "Where It's At"),
+        make_track("14", "ZZ Top", "Eliminator", "Sharp Dressed Man"),
+    ]);
+
+    let artists = lib.artists();
+    assert_eq!(
+        artists,
+        vec![
+            "Beach Boys",
+            "The Beatles",
+            "Beck",
+            "Pink Floyd",
+            "Radiohead",
+            "The White Stripes",
+            "ZZ Top",
+        ]
+    );
+}
+

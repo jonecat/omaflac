@@ -24,10 +24,30 @@ impl Library {
         path
     }
 
+    pub fn strip_leading_the(name: &str) -> &str {
+        let trimmed = name.trim();
+        if trimmed.len() > 4 && trimmed.as_bytes()[..4].eq_ignore_ascii_case(b"the ") {
+            trimmed[4..].trim_start()
+        } else {
+            trimmed
+        }
+    }
+
+    pub fn compare_artist_names(a: &str, b: &str) -> std::cmp::Ordering {
+        let key_a = Self::strip_leading_the(a);
+        let key_b = Self::strip_leading_the(b);
+        key_a
+            .to_lowercase()
+            .cmp(&key_b.to_lowercase())
+            .then_with(|| a.to_lowercase().cmp(&b.to_lowercase()))
+            .then_with(|| a.cmp(b))
+    }
+
     pub fn load() -> Self {
         let path = Self::library_path();
         if let Ok(file) = std::fs::File::open(&path) {
-            if let Ok(lib) = serde_json::from_reader::<_, Self>(file) {
+            if let Ok(mut lib) = serde_json::from_reader::<_, Self>(file) {
+                lib.sort_tracks();
                 return lib;
             }
         }
@@ -43,8 +63,8 @@ impl Library {
 
     pub fn sort_tracks(&mut self) {
         self.tracks.sort_by(|a, b| {
-            a.artist
-                .cmp(&b.artist)
+            Self::compare_artist_names(a.display_artist(), b.display_artist())
+                .then_with(|| a.album.to_lowercase().cmp(&b.album.to_lowercase()))
                 .then_with(|| a.album.cmp(&b.album))
                 .then_with(|| a.disc_number.cmp(&b.disc_number))
                 .then_with(|| a.track_number.cmp(&b.track_number))
@@ -129,7 +149,9 @@ impl Library {
         for track in &self.tracks {
             set.insert(track.display_artist().to_string());
         }
-        set.into_iter().collect()
+        let mut list: Vec<String> = set.into_iter().collect();
+        list.sort_by(|a, b| Self::compare_artist_names(a, b));
+        list
     }
 
     pub fn albums_by_artist(&self, artist: &str) -> Vec<String> {
@@ -174,7 +196,8 @@ impl Library {
             }
         }
 
-        map.into_iter()
+        let mut albums: Vec<AlbumSummary> = map
+            .into_iter()
             .map(|((artist, album), (track_count, total_duration_secs, year, has_cover_art))| {
                 AlbumSummary {
                     artist,
@@ -185,7 +208,15 @@ impl Library {
                     has_cover_art,
                 }
             })
-            .collect()
+            .collect();
+
+        albums.sort_by(|a, b| {
+            Self::compare_artist_names(&a.artist, &b.artist)
+                .then_with(|| a.album.to_lowercase().cmp(&b.album.to_lowercase()))
+                .then_with(|| a.album.cmp(&b.album))
+        });
+
+        albums
     }
 
     pub fn search(&self, query: &str) -> Vec<&Track> {

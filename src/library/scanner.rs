@@ -116,10 +116,10 @@ impl Scanner {
             }
         }
 
-        // Sort by Album, Disc, Track number, Title
+        // Sort by Artist (ignoring leading 'The '), Album, Disc, Track number, Title
         tracks.sort_by(|a, b| {
-            a.artist
-                .cmp(&b.artist)
+            crate::library::Library::compare_artist_names(a.display_artist(), b.display_artist())
+                .then_with(|| a.album.to_lowercase().cmp(&b.album.to_lowercase()))
                 .then_with(|| a.album.cmp(&b.album))
                 .then_with(|| a.disc_number.cmp(&b.disc_number))
                 .then_with(|| a.track_number.cmp(&b.track_number))
