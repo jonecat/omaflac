@@ -451,5 +451,58 @@ fn test_header_search_and_help_button_styling() {
     assert!(text_active.contains("Esc"), "Active search should display 'Esc' cancel hint");
 }
 
+#[test]
+fn test_settings_view_locked_terminal_theme() {
+    use omaflac::config::AppConfig;
+    use omaflac::ui::theme::OmarchyTheme;
+    use omaflac::ui::views::settings_view::SettingsView;
+    use omaflac::updater::UpdateStatus;
+    use ratatui::buffer::Buffer;
+    use ratatui::layout::Rect;
+
+    let config = AppConfig::default();
+    let theme = OmarchyTheme::default();
+    let update_status = UpdateStatus::Idle;
+
+    let view = SettingsView {
+        config: &config,
+        selected_folder_idx: 0,
+        new_folder_input: "",
+        is_entering_folder: false,
+        is_scanning: false,
+        scan_status: "",
+        update_status: &update_status,
+        is_focused: true,
+        theme: &theme,
+    };
+
+    let area = Rect::new(0, 0, 100, 30);
+    let mut buf = Buffer::empty(area);
+    let targets = view.render_with_targets(area, &mut buf);
+
+    let rendered: String = buf.content().iter().map(|c| c.symbol()).collect();
+    assert!(
+        !rendered.contains("APPEARANCE & THEME"),
+        "Settings should not contain APPEARANCE & THEME section"
+    );
+    assert!(
+        !rendered.contains("Cycle Theme"),
+        "Settings should not have a Cycle Theme button / random theme selector"
+    );
+
+    // Verify no click target exists for cycling theme
+    for target in &targets {
+        let text_inside: String = (target.rect.left()..target.rect.right())
+            .map(|x| buf[(x, target.rect.top() + (target.rect.height / 2))].symbol())
+            .collect();
+        assert!(
+            !text_inside.contains("Cycle"),
+            "Click target should not be for cycling theme: {}",
+            text_inside
+        );
+    }
+}
+
+
 
 

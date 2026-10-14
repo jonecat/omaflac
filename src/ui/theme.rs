@@ -117,13 +117,13 @@ impl OmarchyTheme {
     }
 
     pub fn load() -> Self {
-        Self::load_with_preference(None)
+        Self::load_with_preference(Some("auto"))
     }
 
     pub fn load_with_preference(preferred: Option<&str>) -> Self {
         let pref = preferred.unwrap_or("auto").trim().to_lowercase();
 
-        // 1. If user explicitly chose a preset (not "auto"), load that preset directly
+        // 1. If explicitly requested a preset (e.g. for unit tests), load it
         if pref != "auto" && !pref.is_empty() {
             if let Some(preset) = Self::load_preset(&pref) {
                 return preset;
@@ -140,7 +140,12 @@ impl OmarchyTheme {
             return omarchy;
         }
 
-        // 4. Auto-detect from terminal configs (Ghostty, Kitty, Alacritty, WezTerm)
+        // 4. Try active running terminal emulator first
+        if let Some(active) = Self::detect_active_terminal_theme() {
+            return active;
+        }
+
+        // 5. Fallback auto-detect from terminal configs (Ghostty, Kitty, Alacritty, WezTerm, Foot)
         if let Some(ghostty) = Self::detect_ghostty_theme() {
             return ghostty;
         }
@@ -153,13 +158,16 @@ impl OmarchyTheme {
         if let Some(wezterm) = Self::detect_wezterm_theme() {
             return wezterm;
         }
+        if let Some(foot) = Self::detect_foot_theme() {
+            return foot;
+        }
 
-        // 5. Query terminal dynamically via OSC 10 / OSC 11
+        // 6. Query terminal dynamically via OSC 10 / OSC 11
         if let Some(osc) = Self::detect_from_terminal_osc() {
             return osc;
         }
 
-        // 6. Default fallback
+        // 7. Default fallback
         let mut def = Self::preset_omarchy_default();
         def.preferred_name = "auto".to_string();
         def
@@ -616,6 +624,131 @@ impl OmarchyTheme {
             }
         }
         None
+    }
+
+    fn detect_active_terminal_theme() -> Option<Self> {
+        let is_ghostty = std::env::var("GHOSTTY_RESOURCES_DIR").is_ok()
+            || std::env::var("TERM_PROGRAM").map(|s| s.eq_ignore_ascii_case("ghostty")).unwrap_or(false);
+        if is_ghostty {
+            if let Some(theme) = Self::detect_ghostty_theme() {
+                return Some(theme);
+            }
+        }
+
+        let is_kitty = std::env::var("KITTY_WINDOW_ID").is_ok()
+            || std::env::var("KITTY_PID").is_ok()
+            || std::env::var("TERM").map(|s| s == "xterm-kitty").unwrap_or(false);
+        if is_kitty {
+            if let Some(theme) = Self::detect_kitty_theme() {
+                return Some(theme);
+            }
+        }
+
+        let is_alacritty = std::env::var("ALACRITTY_WINDOW_ID").is_ok()
+            || std::env::var("ALACRITTY_SOCKET").is_ok()
+            || std::env::var("ALACRITTY_LOG").is_ok()
+            || std::env::var("TERM").map(|s| s == "alacritty").unwrap_or(false);
+        if is_alacritty {
+            if let Some(theme) = Self::detect_alacritty_theme() {
+                return Some(theme);
+            }
+        }
+
+        let is_wezterm = std::env::var("WEZTERM_PANE").is_ok()
+            || std::env::var("WEZTERM_EXECUTABLE").is_ok()
+            || std::env::var("TERM_PROGRAM").map(|s| s.eq_ignore_ascii_case("wezterm")).unwrap_or(false);
+        if is_wezterm {
+            if let Some(theme) = Self::detect_wezterm_theme() {
+                return Some(theme);
+            }
+        }
+
+        let is_foot = std::env::var("FOOT_TERMINAL").is_ok()
+            || std::env::var("TERM").map(|s| s.starts_with("foot")).unwrap_or(false);
+        if is_foot {
+            if let Some(theme) = Self::detect_foot_theme() {
+                return Some(theme);
+            }
+        }
+
+        None
+    }
+
+    fn detect_foot_theme() -> Option<Self> {
+        let home = dirs::home_dir()?;
+        let candidates = [
+            home.join(".config/foot/foot.ini"),
+            home.join(".local/state/omarchy/current/theme/foot.ini"),
+        ];
+
+        let mut config_path = None;
+        for c in &candidates {
+            if c.exists() {
+                config_path = Some(c.clone());
+                break;
+            }
+        }
+
+        let path = config_path?;
+        let content = fs::read_to_string(&path).ok()?;
+        let mtime = fs::metadata(&path).ok().and_then(|m| m.modified().ok());
+
+        let mut bg = None;
+        let mut fg = None;
+        let mut sel = None;
+        let mut pal = [None; 16];
+        let mut in_colors = false;
+
+        for line in content.lines() {
+            let trimmed = line.trim();
+            if trimmed.starts_with('#') || trimmed.is_empty() {
+                continue;
+            }
+            if trimmed.starts_with('[') && trimmed.ends_with(']') {
+                in_colors = trimmed.eq_ignore_ascii_case("[colors]");
+                continue;
+            }
+            if in_colors {
+                if let Some((k, v)) = trimmed.split_once('=') {
+                    let key = k.trim().to_lowercase();
+                    let val = v.trim().trim_matches('"').trim_matches('\'').trim();
+                    if key == "background" {
+                        bg = Self::parse_hex(val);
+                    } else if key == "foreground" {
+                        fg = Self::parse_hex(val);
+                    } else if key == "selection-background" || key == "selection_background" {
+                        sel = Self::parse_hex(val);
+                    } else if let Some(idx_s) = key.strip_prefix("regular") {
+                        if let Ok(idx) = idx_s.parse::<usize>() {
+                            if idx < 8 {
+                                pal[idx] = Self::parse_hex(val);
+                            }
+                        }
+                    } else if let Some(idx_s) = key.strip_prefix("bright") {
+                        if let Ok(idx) = idx_s.parse::<usize>() {
+                            if idx < 8 {
+                                pal[idx + 8] = Self::parse_hex(val);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        if bg.is_some() || pal.iter().any(|c| c.is_some()) {
+            Some(Self::build_from_palette(
+                "Foot Theme".to_string(),
+                bg,
+                fg,
+                sel,
+                pal,
+                vec![path],
+                mtime,
+                "auto".to_string(),
+            ))
+        } else {
+            None
+        }
     }
 
     fn detect_from_terminal_osc() -> Option<Self> {

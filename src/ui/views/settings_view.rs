@@ -20,7 +20,6 @@ pub enum SettingsAction {
     CheckUpdate,
     RunUpdate,
     RestartApp,
-    CycleTheme,
 }
 
 pub struct SettingsView<'a> {
@@ -280,36 +279,7 @@ impl<'a> SettingsView<'a> {
             y += 1;
         }
 
-        // Section: Appearance & Theme
-        if y < inner.bottom().saturating_sub(8) {
-            buf.set_string(
-                inner.left() + 1,
-                y,
-                "APPEARANCE & THEME",
-                self.theme.accent_text(),
-            );
-            y += 1;
 
-            let theme_label = format!("• Active Theme: {}", self.theme.name);
-            buf.set_string(inner.left() + 1, y, &theme_label, self.theme.primary_text());
-            y += 2;
-
-            let cycle_rect = self.render_button_cap(
-                buf,
-                inner.left() + 1,
-                y,
-                "Cycle Theme (t)",
-                Style::default()
-                    .fg(self.theme.cyan)
-                    .add_modifier(Modifier::BOLD),
-                self.theme.block_style(),
-            );
-            targets.push(SettingsClickTarget {
-                rect: cycle_rect,
-                action: SettingsAction::CycleTheme,
-            });
-            y += 4;
-        }
 
         // Section: Application Version & Updates
         if y < inner.bottom().saturating_sub(5) {

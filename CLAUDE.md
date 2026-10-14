@@ -4,7 +4,7 @@
 - **Check Compilation**: `cargo check`
 - **Run Tests**: `cargo test`
 - **Build Release**: `cargo build --release`
-- **Install to Local Path**: `cargo build --release && cp target/release/omaflac ~/.local/bin/omaflac`
+- **Install to Local Path**: `cargo build --release && install -m 755 target/release/omaflac ~/.local/bin/omaflac`
 - **Run Player**: `./target/release/omaflac`
 
 ## Architectural Guidelines
@@ -17,3 +17,4 @@
    - Default initial view: `ViewMode::Artists`.
 6. **Focus Highlights**: Active focus area (`FocusArea::Sidebar`, `FocusArea::MainView`, `FocusArea::PlayerBar`) must highlight border with `theme.block_focus_style()` and title with `●`.
 7. **Mouse/Keyboard Parity**: Every clickable widget must register a click target struct and handle events in `src/app.rs`.
+8. **Terminal-Locked Theme**: OmaFLAC always assumes and locks to the host terminal's theme (Ghostty, Kitty, Alacritty, WezTerm, Foot, Omarchy, or terminal OSC query). Never add manual theme selectors.

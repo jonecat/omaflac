@@ -58,7 +58,6 @@ impl HelpModal {
             ("  r / D          ", "Rename / Delete playlist (in Playlists)"),
             ("  d              ", "Remove track from playlist"),
             ("  L              ", "Toggle lyrics in Visualizer"),
-            ("  t              ", "Cycle theme (in Settings)"),
             ("", ""),
             ("MOUSE & SHORTCUTS", ""),
             ("  Click anywhere ", "Activate view, play, seek, volume"),

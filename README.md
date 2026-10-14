@@ -69,6 +69,8 @@
   - Update in-app from **Settings (`6`)** while music continues playing, or from the terminal via `omaflac update`.
 - **Global Instant Search**:
   - Press `/` or click the top search bar to filter across Artists, Albums, and Songs in real time.
+- **Terminal-Synchronized Theme Engine**:
+  - Automatically assumes and locks to your host terminal emulator's palette (Ghostty, Kitty, Alacritty, WezTerm, Foot, Omarchy, or terminal OSC 10/11 query) with zero-configuration live hot-reloading.
 
 ---
 
@@ -195,7 +197,7 @@ omaflac
 ## 📁 Configuration & Data Paths
 
 `OmaFLAC` stores user configuration and cached library metadata in standard system config and cache directories:
-- `~/.config/omaflac/config.json`: Library folders, volume, repeat mode, shuffle state, theme preference, and lyrics visibility (`show_lyrics`).
+- `~/.config/omaflac/config.json`: Library folders, volume, repeat mode, shuffle state, and lyrics visibility (`show_lyrics`).
 - `~/.config/omaflac/library.json`: Scanned track database and metadata index.
 - `~/.config/omaflac/playlists.json`: User-created playlists, favorites, and recently played tracks.
 - `~/.config/omaflac/waveforms/`: Cached track amplitude waveforms for instant loading.

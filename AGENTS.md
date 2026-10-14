@@ -103,6 +103,10 @@ omaflac/
 - Every clickable button, list item, or slider must register a click target struct during rendering (e.g., `PlayerClickTarget`, `SidebarClickTarget`, `ArtistsViewClickTarget`).
 - Mouse events in `src/app.rs` route through `handle_mouse_event` to ensure 100% feature parity between keyboard shortcuts and mouse clicks/scrolls.
 
+### 5. Terminal-Locked Theme Invariant
+- OmaFLAC strictly locks its color palette to the host terminal emulator (Ghostty, Kitty, Alacritty, WezTerm, Foot, Omarchy, or terminal OSC query).
+- Theme preferences are not selected via random cycling or settings menus; theme changes in the host terminal/environment hot-reload automatically via `self.theme.refresh_if_changed()`.
+
 ---
 
 ## 4. Common Developer Workflows
