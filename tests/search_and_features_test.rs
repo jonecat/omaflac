@@ -555,7 +555,28 @@ fn test_fps_setting_adjustment_and_clamping() {
     assert_eq!(b3.len(), 64);
 }
 
+#[test]
+fn test_adaptive_target_fps_throttling() {
+    if let Ok(mut app) = omaflac::app::App::new() {
+        app.config.visualizer_fps = 60;
+        app.config.visualizer_enabled = true;
 
+        // When not in NowPlaying view (e.g. Artists, Songs, Settings), target_fps is throttled to 10 FPS
+        app.view_mode = omaflac::app::ViewMode::Artists;
+        assert_eq!(app.target_fps(), 10, "Artists view should throttle to 10 FPS");
 
+        app.view_mode = omaflac::app::ViewMode::Songs;
+        assert_eq!(app.target_fps(), 10, "Songs view should throttle to 10 FPS");
 
+        app.view_mode = omaflac::app::ViewMode::Settings;
+        assert_eq!(app.target_fps(), 10, "Settings view should throttle to 10 FPS");
 
+        // When in NowPlaying view, but playback is not playing, throttled to 10 FPS
+        app.view_mode = omaflac::app::ViewMode::NowPlaying;
+        assert_eq!(app.target_fps(), 10, "NowPlaying view while stopped/paused should throttle to 10 FPS");
+
+        // When visualizer is disabled in config, throttled to 10 FPS even in NowPlaying view
+        app.config.visualizer_enabled = false;
+        assert_eq!(app.target_fps(), 10, "NowPlaying view with visualizer disabled should throttle to 10 FPS");
+    }
+}

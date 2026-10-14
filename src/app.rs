@@ -12,7 +12,8 @@ use crate::ui::components::folder_dialog::{
 use crate::ui::components::header::HeaderClickTarget;
 use crate::ui::components::player_bar::{PlayerAction, PlayerClickTarget};
 use crate::ui::components::playlist_dialog::{PlaylistDialogClickTarget, PlaylistDialogMode};
-use crate::ui::components::sidebar::{SidebarClickTarget, SidebarComponent, SidebarItem, ViewMode};
+use crate::ui::components::sidebar::{SidebarClickTarget, SidebarComponent, SidebarItem};
+pub use crate::ui::components::sidebar::ViewMode;
 use crate::ui::mouse::{is_inside, relative_x_ratio};
 use crate::ui::views::albums_view::{AlbumColumn, AlbumsViewClickTarget};
 use crate::ui::views::artists_view::{ArtistColumn, ArtistsViewClickTarget};
@@ -2762,5 +2763,19 @@ impl App {
         }
         self.is_entering_fps = false;
         self.fps_input.clear();
+    }
+
+    /// Dynamic frame rate: full configured FPS during active visualizer playback,
+    /// relaxed 10 FPS on static library views or when paused to save battery & GPU.
+    pub fn target_fps(&self) -> u64 {
+        let is_visualizer_active = self.view_mode == ViewMode::NowPlaying
+            && self.config.visualizer_enabled
+            && self.audio.state() == crate::audio::PlaybackState::Playing;
+
+        if is_visualizer_active {
+            self.config.visualizer_fps.clamp(10, 240)
+        } else {
+            10
+        }
     }
 }
