@@ -113,6 +113,8 @@ pub struct App {
     pub settings_selected_folder: usize,
     pub new_folder_input: String,
     pub is_entering_folder: bool,
+    pub is_entering_fps: bool,
+    pub fps_input: String,
     pub is_scanning: bool,
     pub scan_status: String,
     pub scan_found_count: usize,
@@ -152,6 +154,7 @@ impl App {
         let library = Library::load();
         let playlists_manager = PlaylistsManager::load();
         let audio = AudioEngine::new()?;
+        audio.visualizer().set_fps(config.visualizer_fps);
         let artwork_cache = ArtworkCache::new();
 
         // Only show blocking splash loader if library cache is completely empty on first launch
@@ -225,6 +228,8 @@ impl App {
             settings_selected_folder: 0,
             new_folder_input: String::new(),
             is_entering_folder: bool::default(),
+            is_entering_fps: false,
+            fps_input: String::new(),
             is_scanning: false,
             scan_status: String::new(),
             scan_found_count: 0,
@@ -968,6 +973,29 @@ impl App {
             return;
         }
 
+        // 5b. FPS input mode in Settings
+        if self.is_entering_fps {
+            match key.code {
+                KeyCode::Esc => {
+                    self.is_entering_fps = false;
+                    self.fps_input.clear();
+                }
+                KeyCode::Enter => {
+                    self.confirm_fps();
+                }
+                KeyCode::Backspace => {
+                    self.fps_input.pop();
+                }
+                KeyCode::Char(c) if c.is_ascii_digit() => {
+                    if self.fps_input.len() < 4 {
+                        self.fps_input.push(c);
+                    }
+                }
+                _ => {}
+            }
+            return;
+        }
+
         // 6. Global Hotkeys
         match key.code {
             KeyCode::Char('q') => {
@@ -1145,8 +1173,18 @@ impl App {
                 return;
             }
             KeyCode::Char('f') => {
-                self.toggle_favorite_current();
+                if self.view_mode == ViewMode::Settings {
+                    self.start_entering_fps();
+                } else {
+                    self.toggle_favorite_current();
+                }
                 return;
+            }
+            KeyCode::Char('F') => {
+                if self.view_mode == ViewMode::Settings {
+                    self.start_entering_fps();
+                    return;
+                }
             }
             _ => {}
         }
@@ -1592,6 +1630,9 @@ impl App {
                 }
                 KeyCode::Char('s') => {
                     self.trigger_scan();
+                }
+                KeyCode::Char('f') | KeyCode::Char('F') => {
+                    self.start_entering_fps();
                 }
                 _ => {}
             },
@@ -2220,6 +2261,16 @@ impl App {
                             SettingsAction::RestartApp => {
                                 self.trigger_restart();
                             }
+                            SettingsAction::StartEnteringFps => {
+                                self.start_entering_fps();
+                            }
+                            SettingsAction::ConfirmFps => {
+                                self.confirm_fps();
+                            }
+                            SettingsAction::CancelFps => {
+                                self.is_entering_fps = false;
+                                self.fps_input.clear();
+                            }
                         }
                         self.focus = FocusArea::MainView;
                         return;
@@ -2695,5 +2746,21 @@ impl App {
         self.audio.stop();
         self.should_restart = true;
         self.should_quit = true;
+    }
+
+    pub fn start_entering_fps(&mut self) {
+        self.is_entering_fps = true;
+        self.fps_input = self.config.visualizer_fps.clamp(10, 240).to_string();
+    }
+
+    pub fn confirm_fps(&mut self) {
+        if let Ok(fps) = self.fps_input.trim().parse::<u64>() {
+            let clamped = fps.clamp(10, 240);
+            self.config.visualizer_fps = clamped;
+            self.audio.visualizer().set_fps(clamped);
+            self.config.save().ok();
+        }
+        self.is_entering_fps = false;
+        self.fps_input.clear();
     }
 }

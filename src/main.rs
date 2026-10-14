@@ -83,10 +83,12 @@ fn main() -> anyhow::Result<()> {
         }
     };
 
-    let tick_rate = Duration::from_millis(33); // ~30 FPS for smooth FFT visualizer
     let mut last_tick = Instant::now();
 
     while !app.should_quit {
+        let fps = app.config.visualizer_fps.clamp(10, 240);
+        let tick_rate = Duration::from_nanos(1_000_000_000 / fps);
+
         terminal.draw(|f| {
             ui::render_app(f, &mut app);
         })?;

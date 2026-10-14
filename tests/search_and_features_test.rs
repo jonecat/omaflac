@@ -469,6 +469,8 @@ fn test_settings_view_locked_terminal_theme() {
         selected_folder_idx: 0,
         new_folder_input: "",
         is_entering_folder: false,
+        is_entering_fps: false,
+        fps_input: "",
         is_scanning: false,
         scan_status: "",
         update_status: &update_status,
@@ -489,6 +491,14 @@ fn test_settings_view_locked_terminal_theme() {
         !rendered.contains("Cycle Theme"),
         "Settings should not have a Cycle Theme button / random theme selector"
     );
+    assert!(
+        rendered.contains("VISUALIZER & REFRESH RATE"),
+        "Settings should contain VISUALIZER & REFRESH RATE section"
+    );
+    assert!(
+        rendered.contains("Change FPS"),
+        "Settings should contain Change FPS button"
+    );
 
     // Verify no click target exists for cycling theme
     for target in &targets {
@@ -501,7 +511,50 @@ fn test_settings_view_locked_terminal_theme() {
             text_inside
         );
     }
+
+    // Verify FPS input prompt rendering
+    let view_entering = SettingsView {
+        config: &config,
+        selected_folder_idx: 0,
+        new_folder_input: "",
+        is_entering_folder: false,
+        is_entering_fps: true,
+        fps_input: "120",
+        is_scanning: false,
+        scan_status: "",
+        update_status: &update_status,
+        is_focused: true,
+        theme: &theme,
+    };
+    let mut buf2 = Buffer::empty(area);
+    let targets2 = view_entering.render_with_targets(area, &mut buf2);
+    let rendered2: String = buf2.content().iter().map(|c| c.symbol()).collect();
+    assert!(rendered2.contains("120█"));
+    assert!(rendered2.contains("Confirm"));
+    assert!(rendered2.contains("Cancel"));
+    assert!(targets2.iter().any(|t| matches!(t.action, omaflac::ui::views::settings_view::SettingsAction::ConfirmFps)));
+    assert!(targets2.iter().any(|t| matches!(t.action, omaflac::ui::views::settings_view::SettingsAction::CancelFps)));
 }
+
+#[test]
+fn test_fps_setting_adjustment_and_clamping() {
+    use omaflac::audio::visualizer::VisualizerBridge;
+
+    let viz = VisualizerBridge::new(44100);
+    // Test set_fps clamping
+    viz.set_fps(5); // below min 10
+    let (b1, _) = viz.get_bands();
+    assert_eq!(b1.len(), 64);
+
+    viz.set_fps(144); // higher refresh rate
+    let (b2, _) = viz.get_bands();
+    assert_eq!(b2.len(), 64);
+
+    viz.set_fps(500); // above max 240
+    let (b3, _) = viz.get_bands();
+    assert_eq!(b3.len(), 64);
+}
+
 
 
 

@@ -54,7 +54,7 @@ impl HelpModal {
             ("LIBRARY & PLAYLISTS", ""),
             ("  /              ", "Global search across library"),
             ("  a              ", "Add selected track to playlist"),
-            ("  f              ", "Toggle favorite status"),
+            ("  f              ", "Toggle favorite (Change FPS in Settings)"),
             ("  r / D          ", "Rename / Delete playlist (in Playlists)"),
             ("  d              ", "Remove track from playlist"),
             ("  L              ", "Toggle lyrics in Visualizer"),

@@ -50,7 +50,7 @@
   - Renders crisp album covers using an adaptive half-block (`▀`) 24-bit RGB renderer and protocol-aware terminal image engine (Kitty, Sixel, iTerm2, Ghostty, WezTerm, Alacritty, Foot).
 - **Real-Time FFT Spectrum Visualizer**:
   - Live lock-free audio tap feeding a 1024-point Hann-windowed Fast Fourier Transform (`rustfft`).
-  - Logarithmically spaced frequency bands with smooth attack/decay ballistics rendered in the **Visualizer** view.
+  - Logarithmically spaced frequency bands with adaptive attack/decay ballistics rendered in the **Visualizer** view at user-configurable refresh rates (10–240 FPS, default: 60 FPS).
 - **High-Resolution Braille Track Waveform**:
   - Pre-calculates full-track amplitude dynamics in a background worker thread and caches waveforms on disk.
   - Renders a `btop`-style 2×4 Braille matrix (`U+2800..U+28FF`) waveform with played vs. unplayed color coding and instant click-to-seek.
@@ -60,7 +60,7 @@
   - **Songs (`3`)**: Filterable library table with track metadata, duration, format badges, and favorite stars (`★`).
   - **Visualizer (`4`)**: Large album cover art, lossless format/sample-rate/bit-depth readout, synchronized 3-line lyrics panel (`L`), live FFT spectrum analyzer, and compact track waveform. Full skip back and forth via `←`/`→` or `h`/`l`.
   - **Playlists (`5`)**: Built-in **★ Favorites**, **◷ Recently Played**, and custom user playlists (`a` to add tracks, `n` to create playlists, `d` to remove tracks).
-  - **Settings (`6`)**: Manage library folders via an interactive **Add Library Folder** modal, trigger incremental library syncs (`s`) or full metadata rescans (`S`), and check/install **Application Updates** directly inside the TUI.
+  - **Settings (`6`)**: Manage library folders, customize spectrum visualizer refresh rate (10–240 FPS), trigger incremental library syncs (`s`) or full metadata rescans (`S`), and check/install **Application Updates** directly inside the TUI.
 - **Incremental Background Library Sync (Remote / NAS Friendly)**:
   - Loads your cached library instantaneously on startup and automatically runs a non-destructive incremental sync in the background (`⟳ Syncing...` in the top bar).
   - Uses file size + modification timestamp (`stat`) caching to skip opening unchanged files over network mounts, streams additions/removals live without cursor jumping, and preserves cached tracks if a remote server/NAS is offline.
@@ -197,7 +197,7 @@ omaflac
 ## 📁 Configuration & Data Paths
 
 `OmaFLAC` stores user configuration and cached library metadata in standard system config and cache directories:
-- `~/.config/omaflac/config.json`: Library folders, volume, repeat mode, shuffle state, and lyrics visibility (`show_lyrics`).
+- `~/.config/omaflac/config.json`: Library folders, volume, repeat mode, shuffle state, visualizer target refresh rate (`visualizer_fps`), and lyrics visibility (`show_lyrics`).
 - `~/.config/omaflac/library.json`: Scanned track database and metadata index.
 - `~/.config/omaflac/playlists.json`: User-created playlists, favorites, and recently played tracks.
 - `~/.config/omaflac/waveforms/`: Cached track amplitude waveforms for instant loading.

@@ -33,11 +33,16 @@ pub struct AppConfig {
     pub repeat_mode: RepeatMode,
     pub shuffle: bool,
     pub visualizer_enabled: bool,
+    #[serde(default = "default_visualizer_fps")]
     pub visualizer_fps: u64,
     #[serde(default = "default_theme")]
     pub theme: String,
     #[serde(default = "default_show_lyrics")]
     pub show_lyrics: bool,
+}
+
+fn default_visualizer_fps() -> u64 {
+    60
 }
 
 fn default_theme() -> String {
@@ -69,7 +74,7 @@ impl Default for AppConfig {
             repeat_mode: RepeatMode::Off,
             shuffle: false,
             visualizer_enabled: true,
-            visualizer_fps: 30,
+            visualizer_fps: 60,
             theme: default_theme(),
             show_lyrics: true,
         }

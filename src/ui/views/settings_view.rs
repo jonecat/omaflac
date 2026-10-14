@@ -20,6 +20,9 @@ pub enum SettingsAction {
     CheckUpdate,
     RunUpdate,
     RestartApp,
+    StartEnteringFps,
+    ConfirmFps,
+    CancelFps,
 }
 
 pub struct SettingsView<'a> {
@@ -27,6 +30,8 @@ pub struct SettingsView<'a> {
     pub selected_folder_idx: usize,
     pub new_folder_input: &'a str,
     pub is_entering_folder: bool,
+    pub is_entering_fps: bool,
+    pub fps_input: &'a str,
     pub is_scanning: bool,
     pub scan_status: &'a str,
     pub update_status: &'a UpdateStatus,
@@ -280,6 +285,86 @@ impl<'a> SettingsView<'a> {
         }
 
 
+
+        // Section: Visualizer & Refresh Rate
+        if y < inner.bottom().saturating_sub(6) {
+            buf.set_string(
+                inner.left() + 1,
+                y,
+                "VISUALIZER & REFRESH RATE",
+                self.theme.accent_text(),
+            );
+            y += 1;
+
+            let fps_val = self.config.visualizer_fps.clamp(10, 240);
+            let fps_label = format!("• Target Refresh Rate: {} FPS  (Range: 10 – 240 FPS)", fps_val);
+            buf.set_string(inner.left() + 1, y, &fps_label, self.theme.primary_text());
+            y += 2;
+
+            if self.is_entering_fps {
+                buf.set_string(
+                    inner.left() + 1,
+                    y,
+                    "Enter target frame rate (10 – 240 FPS):",
+                    self.theme.primary_text(),
+                );
+                y += 1;
+
+                let input_width = 12u16.min(inner.width.saturating_sub(22).max(6));
+                let input_rect = Rect::new(inner.left() + 1, y + 1, input_width, 1);
+                for x in input_rect.left()..input_rect.right() {
+                    buf[(x, y + 1)].set_bg(self.theme.selection);
+                }
+                let input_text = format!(" {}█", self.fps_input);
+                buf.set_string(inner.left() + 1, y + 1, &input_text, self.theme.accent_text());
+
+                let mut btn_x = input_rect.right() + 2;
+                let confirm_rect = self.render_button_cap(
+                    buf,
+                    btn_x,
+                    y,
+                    "Confirm",
+                    Style::default().fg(self.theme.accent).add_modifier(Modifier::BOLD),
+                    self.theme.block_focus_style(),
+                );
+                targets.push(SettingsClickTarget {
+                    rect: confirm_rect,
+                    action: SettingsAction::ConfirmFps,
+                });
+                btn_x += confirm_rect.width + 2;
+
+                let cancel_rect = self.render_button_cap(
+                    buf,
+                    btn_x,
+                    y,
+                    "Cancel (Esc)",
+                    self.theme.muted_text(),
+                    self.theme.block_style(),
+                );
+                targets.push(SettingsClickTarget {
+                    rect: cancel_rect,
+                    action: SettingsAction::CancelFps,
+                });
+
+                y += 4;
+            } else {
+                let change_rect = self.render_button_cap(
+                    buf,
+                    inner.left() + 1,
+                    y,
+                    "Change FPS (f)",
+                    Style::default()
+                        .fg(self.theme.cyan)
+                        .add_modifier(Modifier::BOLD),
+                    self.theme.block_style(),
+                );
+                targets.push(SettingsClickTarget {
+                    rect: change_rect,
+                    action: SettingsAction::StartEnteringFps,
+                });
+                y += 4;
+            }
+        }
 
         // Section: Application Version & Updates
         if y < inner.bottom().saturating_sub(5) {

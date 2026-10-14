@@ -15,6 +15,7 @@ struct VisualizerState {
     sample_buffer: Vec<f32>,
     write_pos: usize,
     sample_rate: u32,
+    fps: u32,
     band_values: Vec<f32>,
     peak_values: Vec<f32>,
     fft: Arc<dyn rustfft::Fft<f32>>,
@@ -36,11 +37,18 @@ impl VisualizerBridge {
                 sample_buffer: vec![0.0; FFT_SIZE],
                 write_pos: 0,
                 sample_rate: sample_rate.max(1),
+                fps: 60,
                 band_values: vec![0.0; NUM_BANDS],
                 peak_values: vec![0.0; NUM_BANDS],
                 fft,
                 complex_buffer: vec![Complex::new(0.0, 0.0); FFT_SIZE],
             })),
+        }
+    }
+
+    pub fn set_fps(&self, fps: u64) {
+        if let Ok(mut state) = self.state.lock() {
+            state.fps = (fps as u32).clamp(10, 240);
         }
     }
 
@@ -149,6 +157,13 @@ impl VisualizerBridge {
             raw_bands[band] = scaled;
         }
 
+        // Compute frame-rate delta scaling relative to 30 FPS baseline
+        let fps = state.fps.max(10) as f32;
+        let dt_ratio = 30.0 / fps;
+        let attack_factor = (1.0 - (1.0 - 0.65f32).powf(dt_ratio)).clamp(0.01, 1.0);
+        let decay_factor = (1.0 - (1.0 - 0.20f32).powf(dt_ratio)).clamp(0.01, 1.0);
+        let peak_falloff = 0.02 * dt_ratio;
+
         // Decay & smoothing with hysteresis snap (eliminates limit-cycle jitter on static signals)
         for b in 0..NUM_BANDS {
             let target = raw_bands[b];
@@ -158,9 +173,9 @@ impl VisualizerBridge {
             let next_val = if diff.abs() < 1e-4 {
                 target
             } else if diff > 0.0 {
-                current + diff * 0.65
+                current + diff * attack_factor
             } else {
-                current + diff * 0.20
+                current + diff * decay_factor
             };
             let next_val = next_val.clamp(0.0, 1.0);
             state.band_values[b] = next_val;
@@ -170,7 +185,7 @@ impl VisualizerBridge {
             let next_peak = if next_val >= peak || (peak - next_val).abs() < 1e-4 {
                 next_val
             } else {
-                (peak - 0.02).max(next_val)
+                (peak - peak_falloff).max(next_val)
             };
             state.peak_values[b] = next_peak.clamp(0.0, 1.0);
         }

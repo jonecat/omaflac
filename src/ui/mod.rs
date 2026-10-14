@@ -252,6 +252,8 @@ pub fn render_app(frame: &mut Frame, app: &mut App) {
                 selected_folder_idx: app.settings_selected_folder,
                 new_folder_input: &app.new_folder_input,
                 is_entering_folder: app.is_entering_folder,
+                is_entering_fps: app.is_entering_fps,
+                fps_input: &app.fps_input,
                 is_scanning: app.is_scanning,
                 scan_status: &app.scan_status,
                 update_status: &app.update_status,
