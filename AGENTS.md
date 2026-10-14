@@ -20,6 +20,8 @@ Welcome to **OmaFLAC**! This document provides a concise, high-leverage architec
 
 ```
 omaflac/
+├── assets/                         # Documentation screenshot assets
+│   └── screenshots/
 ├── Cargo.toml
 ├── Cargo.lock
 ├── build.rs                        # Embeds compile-time Git commit hash (OMAFLAC_GIT_HASH)

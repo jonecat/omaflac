@@ -5,6 +5,28 @@
 
 `OmaFLAC` is a high-fidelity Terminal User Interface (TUI) audio player originally engineered for **Omarchy Linux** and designed to run seamlessly across **all modern Linux distributions** as well as **macOS**. Combining the signature Omarchy aesthetic with an audiophile-grade gapless playback engine, `OmaFLAC` delivers 24-bit truecolor album artwork, time-synchronized 3-line lyrics, a real-time FFT frequency spectrum analyzer, `btop`-inspired Braille track waveforms, an interactive directory explorer modal, and 100% parity between keyboard shortcuts and mouse navigation.
 
+<p align="center">
+  <img src="assets/screenshots/visualizer.png" alt="OmaFLAC Real-Time FFT Visualizer and Braille Waveform" width="100%" />
+</p>
+
+---
+
+## 📸 Screenshots
+
+| **Hierarchical Library Browser (`1`)** | **Synchronized 3-Line Lyrics (`L`)** |
+| :---: | :---: |
+| <img src="assets/screenshots/library-artists.png" alt="OmaFLAC Artists View - 3-column library browser" width="100%" /> | <img src="assets/screenshots/lyrics-visualizer.png" alt="OmaFLAC Synchronized 3-Line Lyrics with Spectrum and Cover Art" width="100%" /> |
+| *3-column browser (Artists → Albums → Songs) with persistent Now Playing deck and 24-bit album artwork* | *Time-synchronized 3-line lyrics panel (`L`), album cover art, live spectrum analyzer, and waveform* |
+| **Real-Time FFT Visualizer & Waveform (`4`)** | **Interactive Controls & Help Overlay (`?` / `F1`)** |
+| <img src="assets/screenshots/visualizer.png" alt="OmaFLAC Visualizer - Real-time FFT spectrum and Braille waveform" width="100%" /> | <img src="assets/screenshots/controls-help.png" alt="OmaFLAC Help Modal - Controls and keyboard shortcuts" width="100%" /> |
+| *1024-point Hann FFT frequency spectrum analyzer, btop-style Braille waveform, and lossless metadata* | *Interactive keyboard shortcuts & mouse navigation reference overlay* |
+
+<p align="center">
+  <b>About OmaFLAC & Codec Support</b><br>
+  <img src="assets/screenshots/about-modal.png" alt="About OmaFLAC Modal - ASCII art and version info" width="70%" /><br>
+  <i>Stylized ASCII branding, build version, Git commit hash, and supported lossless audio codecs</i>
+</p>
+
 ---
 
 ## ✨ Features
@@ -185,6 +207,8 @@ omaflac
 
 ```text
 omaflac/
+├── assets/                             # Screenshot assets for GitHub documentation
+│   └── screenshots/
 ├── build.rs                            # Embeds compile-time Git commit hash (OMAFLAC_GIT_HASH)
 ├── install.sh                          # Cross-platform installer & updater script (Linux & macOS)
 └── src/
